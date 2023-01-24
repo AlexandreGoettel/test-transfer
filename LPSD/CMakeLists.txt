@@ -4,6 +4,12 @@ project(LPSD
 	VERSION 0.0.1
 	DESCRIPTION "2023 Adaptation of LPSD Software for scalability")
 
+# Add HDF5
+SET(HDF5_USE_STATIC_LIBRARIES ON)
+find_package(HDF5 REQUIRED)
+message(STATUS "HDF5 INCLUDE DIR: " ${HDF5_INCLUDE_DIRS})
+include_directories(${HDF5_INCLUDE_DIRS})
+
 # Add FFTW3
 find_package(PkgConfig REQUIRED)
 pkg_search_module(FFTW REQUIRED fftw3 IMPORTED_TARGET)
@@ -50,7 +56,7 @@ SET(HEADERS
 add_executable(${EXENAME} ${SOURCE} ${HEADERS})
 
 # Link & install
-target_link_libraries(${EXENAME} PkgConfig::FFTW)
+target_link_libraries(${EXENAME} PRIVATE HDF5::HDF5 PkgConfig::FFTW)
 target_include_directories(${EXENAME} PRIVATE ${INCLUDEPATH})
 INSTALL(TARGETS ${EXENAME} DESTINATION bin)
 
