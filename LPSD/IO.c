@@ -331,6 +331,8 @@ void read_file(char *ifn, double ulsb, double mean, int start, int nread, int co
 
 }
 
+
+
 /*
 	returns start address of data
 */
@@ -673,4 +675,43 @@ void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc,
 	
 	/* write gnuplot file */
 	writeGnuplotFile(cfg, data, gt, wi, argc, argv);
+}
+
+hid_t* read_hdf5_file(char *filename, char *dataset_name) {
+    // Open data
+    printf("test1");
+    hid_t file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
+    hid_t dataset = H5Dopen(file, dataset_name, H5P_DEFAULT);
+
+    // Configure
+    printf("test2");
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t rank = H5Sget_simple_extent_ndims(dataspace);
+    hsize_t dims[rank];
+    herr_t status = H5Sget_simple_extent_dims(dataspace, dims, NULL);
+
+    printf("rank: %d\n", (int)rank);
+    printf("dims[0]: %d\n", (int)dims[0]);
+
+    // TEST: Read data
+    hsize_t offset[1] = {0};
+    hsize_t count[1] = {10};
+
+    status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, offset, NULL,
+                                 count, NULL);
+    hid_t memspace = H5Screate_simple(rank, dims, NULL);
+    status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, offset, NULL,
+                                 count, NULL);
+
+    double *dset_data = malloc(sizeof(double)*10);
+    status = H5Dread(dataset, H5T_NATIVE_DOUBLE, memspace, dataspace,
+		             H5P_DEFAULT, dset_data);
+    for (int i = 0; i < count[0]; i++) {
+        printf("-%e\n", dset_data[i]);
+    }
+
+    H5Dclose(dataset);
+    H5Sclose(dataspace);
+    H5Sclose(memspace);
+    H5Fclose(file);
 }

@@ -17,6 +17,8 @@
 #include <time.h>
 #include <sys/time.h>		/* gettimeofday, timeval */
 #include <assert.h>
+#include "hdf5.h"
+
 #include "config.h"
 #include "ask.h"
 #include "IO.h"
@@ -344,6 +346,32 @@ int main(int argc, char *argv[])
 	getGNUTERM(cfg.gt, &gt);
 	printConfig(&s[0],cfg, wi, gt, data);
 	printf("%s",s);
+
+//    // Test area
+//	herr_t status;
+//	hid_t h5_file = H5Fcreate("file.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+//	hsize_t dims[1];
+//
+//    // Create dataset
+//    dims[0] = 134217728;
+//	hid_t dspace = H5Screate_simple(1, dims, NULL);
+//	hid_t dset = H5Dcreate (h5_file, "/dset", H5T_STD_I32BE, dspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+//
+//	// Write to dataset
+//	int N = 134217728;
+//	double *dset_data = malloc(sizeof(double)*N);
+//	for (int i = 0; i < 134217728; i++) dset_data[i] = i;
+//	status = H5Dwrite (dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, dset_data);
+//
+//    // Close
+//    status = H5Dclose(dset);
+//    status = H5Sclose(dspace);
+//	status = H5Fclose(h5_file);
+
+    printf("--TEST--");
+    read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/data/local_strain_1243393026_1243509654_256Hz_H1.h5",
+                   "strain");
+    printf("--TEST--");
 
 	checkParams();
 	memalloc(&cfg, &data);
