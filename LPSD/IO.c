@@ -701,16 +701,16 @@ struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name) {
     return (&contents);
 }
 
-// @brief Fill data_out with contents from the hdf5 dataset, according to offset/count.
+// @brief Fill data_out with contents from the hdf5 dataset, according to offset/count
+// @param data_out should have the same dimensions as count
+// @param offset refers to the position in the dataset at which to start reading
 void read_from_dataset(struct hdf5_contents *contents, hsize_t *offset,
                        hsize_t *count, double *data_out) {
     // Use hyperslab to read partial file contents out
     herr_t status;
     status = H5Sselect_hyperslab(contents->dataspace, H5S_SELECT_SET, offset, NULL,
                                  count, NULL);
-    hid_t memspace = H5Screate_simple(contents->rank, contents->dims, NULL);
-    status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, offset, NULL,
-                                 count, NULL);
+    hid_t memspace = H5Screate_simple(contents->rank, count, NULL);
 
     status = H5Dread(contents->dataset, H5T_NATIVE_DOUBLE, memspace, contents->dataspace,
 		             H5P_DEFAULT, data_out);

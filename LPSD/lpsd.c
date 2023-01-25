@@ -703,9 +703,9 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
     struct hdf5_contents *contents = read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/examples/dev/H-H1_GWOSC_4KHZ_R1-1248242616-32.h5",
                                                     "strain");
     // Strain should be 1-D
-    double *dset_data = (double *) malloc(10*sizeof(double));
-    hsize_t offset[1] = {1};
-    hsize_t count[1] = {1};
+    hsize_t offset[1] = {2};
+    hsize_t count[1] = {2};
+    double *dset_data = (double *) malloc(count[0]*sizeof(double));
     read_from_dataset(contents, offset, count, dset_data);
     for (int i = 0; i < 11; i++) printf("\t%e\n", dset_data[i]);
 
