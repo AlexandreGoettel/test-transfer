@@ -331,8 +331,6 @@ void read_file(char *ifn, double ulsb, double mean, int start, int nread, int co
 
 }
 
-
-
 /*
 	returns start address of data
 */
@@ -679,7 +677,8 @@ void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc,
 
 // @brief Read the contents of a metadata and return pointer to hdf5_contents struct.
 // @brief This include ids of file, dataset, dataspace, as well as rank/dims info.
-struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name) {
+struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name)
+{
     // Open data
     hid_t file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
     hid_t dataset = H5Dopen(file, dataset_name, H5P_DEFAULT);
@@ -705,7 +704,8 @@ struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name) {
 // @param data_out should have the same dimensions as count
 // @param offset refers to the position in the dataset at which to start reading
 void read_from_dataset(struct hdf5_contents *contents, hsize_t *offset,
-                       hsize_t *count, double *data_out) {
+                       hsize_t *count, double *data_out)
+{
     // Use hyperslab to read partial file contents out
     herr_t status;
     status = H5Sselect_hyperslab(contents->dataspace, H5S_SELECT_SET, offset, NULL,
@@ -718,7 +718,8 @@ void read_from_dataset(struct hdf5_contents *contents, hsize_t *offset,
     H5Sclose(memspace);
 }
 
-void close_hdf5_contents(struct hdf5_contents *contents) {
+void close_hdf5_contents(struct hdf5_contents *contents)
+{
     H5Dclose(contents->dataset);
     H5Sclose(contents->dataspace);
     H5Fclose(contents->file);

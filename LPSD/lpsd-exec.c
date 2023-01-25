@@ -341,8 +341,8 @@ int main(int argc, char *argv[])
 	getConfig(&cfg);
 	printf("%s",doc);
 	parseArgs(argc, argv, &cfg);
-	if (cfg.usedefs==0) getUserInput();
-	else getDefaultValues();
+	if (cfg.usedefs==0) getUserInput();  // TODO: this calls probe_file()
+	else getDefaultValues();  // TODO: this calls probe_file()
 	getGNUTERM(cfg.gt, &gt);
 	printConfig(&s[0],cfg, wi, gt, data);
 	printf("%s",s);

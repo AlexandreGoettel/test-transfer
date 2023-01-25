@@ -93,7 +93,7 @@ remove_drift (double *segm, double *data, int nfft, int LR)
 {
   int i;
   long double sx, sy, stt, sty, xm, t;
-double a,b;
+  double a,b;
   if (LR == 2)
     {				/* subtract straight line through first and last point */
       a = data[0];
@@ -169,116 +169,25 @@ remove_drift2 (double *a, double *b, double *data, int nfft, int LR)
     }
 }
 
-
-/********************************************************************************
- *	calculates DFT 
- *		
- *	Parameters
- *		nfft	dimension of fft
- *		bin	bin to be calculated
- *		rslt	array for DFT as spectral density and spectrum
- *			and variance
- *			rslt[0]=PSD, rslt[1]=variance(PSD) 
- *			rslt[2]=PS rslt[3]=variance(PS)
- ********************************************************************************/
-static void
-getDFT (int nfft, double bin, double fsamp, double ovlp, int LR, double *rslt,
-	int *avg)
+// @brief Put "count" samples in "segment" (memory), then loop over it to calculate DFT.
+void doDFTIteration(double *segment, double *window_pointer, hsize_t *offset, hsize_t *count,
+                    struct hdf5_contents *contents,
+                    double *dft_re, double *dft_im)
 {
-  double *dwincs;		/* pointer to array containing window function*cos,window function*sin */
-  int i, j;
-  double dft_re, dft_im;	/* real and imaginary part of DFT */
-  int start;			/* first index in data array */
-  double *data;			/* start address of data */
-  double dft2;			/* sum of real part squared and imag part squared */
-  int nsum;			/* number of summands */
-  double *segm;			/* contains data of one segment without drift */
+    // Put strain data in memory
+    read_from_dataset(contents, offset, count, segment);
 
-  double west_q, west_r, west_temp;
-  double west_sumw;		/* temp variable for West's averaging */
-  double west_m, west_t;
-
-  /* calculate window function */
-  dwincs = (double *) xmalloc (2 * nfft * sizeof (double));
-  assert (dwincs != 0);
-
-  makewinsincos (nfft, bin, dwincs, &winsum, &winsum2, &nenbw);
-
-  data = get_data ();
-  assert (data != 0);
-
-  segm = (double *) xmalloc (nfft * sizeof (double));
-  assert (segm != 0);
-
-  /* remove drift from first data segment */
-  remove_drift (&segm[0], &data[0], nfft, LR);
-
-  start = 0;
-  dft2 = 0.;
-  nsum = 1;
-
-  /* calculate first DFT */
-  dft_re = dft_im = 0;
-  for (i = 0, j = 0; i < nfft; i++, j += 2)
-    {
-      dft_re += dwincs[j] * segm[i];
-      dft_im += dwincs[j + 1] * segm[i];
+    // Loop over data to calculate DFT
+    double sample;
+    for (int i = 0; i < (int)count[0]; i++) {
+        sample = segment[i];
+        *dft_re += *(window_pointer++) * sample;
+        *dft_im += *(window_pointer++) * sample;
     }
-  dft2 = dft_re * dft_re + dft_im * dft_im;
-  west_sumw = 1.;
-  west_m = dft2;
-  west_t = 0.;
-
-  start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
-  /* process other segments if available */
-  while (start + nfft < nread)
-    {
-      remove_drift (&segm[0], &data[start], nfft, LR);
-
-      /* calculate DFT */
-      dft_re = dft_im = 0;
-      for (i = 0, j = 0; i < nfft; i++, j += 2)
-	{
-	  dft_re += dwincs[j] * segm[i];
-	  dft_im += dwincs[j + 1] * segm[i];
-	}
-      dft2 = dft_re * dft_re + dft_im * dft_im;
-
-      west_q = dft2 - west_m;
-      west_temp = west_sumw + 1.;
-      west_r = west_q / west_temp;
-      west_m += west_r;
-      west_t += west_r * west_sumw * west_q;
-      west_sumw = west_temp;
-
-      nsum++;
-      start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
-    }
-
-  /* return result */
-  rslt[0] = west_m;
-  /* if only one DFT has been computed, then stddev equals DFT 
-     otherwise, divide variance by n-1, then take root
-   */
-  if (nsum > 2)
-    rslt[1] = sqrt (west_t / ((double) nsum - 1.));
-  else
-    rslt[1] = rslt[0];
-
-  rslt[2] = rslt[0];
-  rslt[3] = rslt[1];
-  rslt[0] *= 2. / (fsamp * winsum2);	/* power spectral density */
-  rslt[1] *= 2. / (fsamp * winsum2);	/* variance of power spectral density */
-  rslt[2] *= 2. / (winsum * winsum);	/* power spectrum */
-  rslt[3] *= 2. / (winsum * winsum);	/* variance of power spectrum */
-
-  *avg = nsum;
-
-  /* clean up */
-  xfree (segm);
-  xfree (dwincs);
 }
 
+//getDFT2 ((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
+//	      (*cfg).LR, &rslt[0], &(*data).avg[k]);
 static void
 getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
 	 double *rslt, int *avg)
@@ -287,22 +196,26 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
   int i;
   double dft_re, dft_im;	/* real and imaginary part of DFT */
   int start;			/* first index in data array */
-  double *data;			/* start address of data */
   double dft2;			/* sum of real part squared and imag part squared */
   int nsum;			/* number of summands */
-  double y;			/* time series detrended with window */
   double *winp, *datp;
+
+  // TODO: remove after testing
+  double *data;
+  double y;
 
   double total;		/* Running sum of DFTs */
 
+  /* Prepare data */
+  // TODO: don't hard-code paths
+  struct hdf5_contents *contents = read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/examples/dev/H-H1_GWOSC_4KHZ_R1-1248242616-32.h5",
+                                                    "strain");
+
   /* calculate window function */
+  // TODO: on the fly?
   dwincs = (double *) xmalloc (2 * nfft * sizeof (double));
   assert (dwincs != 0);
-
   makewinsincos (nfft, bin, dwincs, &winsum, &winsum2, &nenbw);
-
-  data = get_data ();
-  assert (data != 0);
 
   start = 0;
   dft2 = 0.;
@@ -310,16 +223,36 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
 
   /* calculate first DFT */
   dft_re = dft_im = 0;
-  datp = data;
-  winp = dwincs;
-  for (i = 0; i < nfft; i++)
-    {
-      y = *(datp++);
-      dft_re += *(winp++) * y;
-      dft_im += *(winp++) * y;
+  double *window_pointer = dwincs;
+
+  int max_samples_in_memory = 6577770;  // Around 100 MB //TODO: this shouldn't be hard-coded!
+  double *strain_data_segment = (double*) xmalloc(max_samples_in_memory * sizeof(double));
+  int remaining_samples = nfft;
+  int loop_index = 0;
+  hsize_t offset[1], count[1];
+
+  // Loop to calculate DFT over first segment
+  while (remaining_samples > 0)
+  {
+    if (remaining_samples < max_samples_in_memory) {
+      count[0] = remaining_samples;
+      remaining_samples = 0;
+    } else {
+      count[0] = max_samples_in_memory;
+      remaining_samples -= max_samples_in_memory;
     }
+
+    offset[0] = loop_index * max_samples_in_memory;
+    doDFTIteration(strain_data_segment, window_pointer, offset, count,
+                     contents, &dft_re, &dft_im);
+    loop_index++;
+  }
+  // TODO
+  data = get_data ();
+
   dft2 = dft_re * dft_re + dft_im * dft_im;
   total = dft2;
+//  printf("mh: %f\n", total);
 
   start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
   /* process other segments if available */
@@ -341,6 +274,7 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
       nsum++;
       start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
     }
+//  printf("mmh: %f\n--------\n", total);
 
   /* return result */
   rslt[0] = total / nsum;
@@ -359,6 +293,7 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
 
   /* clean up */
   xfree (dwincs);
+  close_hdf5_contents(contents);
 }
 
 
@@ -456,14 +391,12 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   now = start;
   print = start;
   
-  /* Start calculation of LPSD fromi saved checkpoint or zero */
+  /* Start calculation of LPSD from saved checkpoint or zero */
   for (k = k_start; k < (*cfg).nspec; k++)
     {
-    if (FAST)
       getDFT2 ((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
 	      (*cfg).LR, &rslt[0], &(*data).avg[k]);
-else      getDFT ((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
-	       (*cfg).LR, &rslt[0], &(*data).avg[k]);
+
       (*data).psd[k] = rslt[0];
       (*data).varpsd[k] = rslt[1];
       (*data).ps[k] = rslt[2];
@@ -690,27 +623,25 @@ calculate_fftw (tCFG * cfg, tDATA * data)
 void
 calculateSpectrum (tCFG * cfg, tDATA * data)
 {
-  nread = (*data).nread;
-
   /* read data file into memory */
   /* and subtract mean data value */
-  printf ("\nReading data, subtracting mean...\n");
+//  printf ("\nReading data, subtracting mean...\n");
   nread = floor (((*cfg).tmax - (*cfg).tmin) * (*cfg).fsamp + 1);
   read_file ((*cfg).ifn, (*cfg).ulsb, (*data).mean,
 	     (int) ((*cfg).tmin * (*cfg).fsamp), (*data).nread,
 	     (*data).comma);
-    // TEST AREA
-    struct hdf5_contents *contents = read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/examples/dev/H-H1_GWOSC_4KHZ_R1-1248242616-32.h5",
-                                                    "strain");
-    // Strain should be 1-D
-    hsize_t offset[1] = {2};
-    hsize_t count[1] = {2};
-    double *dset_data = (double *) malloc(count[0]*sizeof(double));
-    read_from_dataset(contents, offset, count, dset_data);
-    for (int i = 0; i < 11; i++) printf("\t%e\n", dset_data[i]);
-
-    close_hdf5_contents(contents);
-    // EXIT TEST AREA
+//    // TEST AREA
+//    struct hdf5_contents *contents = read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/examples/dev/H-H1_GWOSC_4KHZ_R1-1248242616-32.h5",
+//                                                    "strain");
+//    // Strain should be 1-D
+//    hsize_t offset[1] = {2};
+//    hsize_t count[1] = {2};
+//    double *dset_data = (double *) malloc(count[0]*sizeof(double));
+//    read_from_dataset(contents, offset, count, dset_data);
+//    for (int i = 0; i < 11; i++) printf("\t%e\n", dset_data[i]);
+//
+//    close_hdf5_contents(contents);
+//    // EXIT TEST AREA
 
   if ((*cfg).METHOD == 0)
     {
