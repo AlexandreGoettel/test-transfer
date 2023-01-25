@@ -677,41 +677,49 @@ void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc,
 	writeGnuplotFile(cfg, data, gt, wi, argc, argv);
 }
 
-hid_t* read_hdf5_file(char *filename, char *dataset_name) {
+// @brief Read the contents of a metadata and return pointer to hdf5_contents struct.
+// @brief This include ids of file, dataset, dataspace, as well as rank/dims info.
+struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name) {
     // Open data
-    printf("test1");
     hid_t file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
     hid_t dataset = H5Dopen(file, dataset_name, H5P_DEFAULT);
-
-    // Configure
-    printf("test2");
     hid_t dataspace = H5Dget_space(dataset);
+
+    // Get dims
     hsize_t rank = H5Sget_simple_extent_ndims(dataspace);
     hsize_t dims[rank];
     herr_t status = H5Sget_simple_extent_dims(dataspace, dims, NULL);
 
-    printf("rank: %d\n", (int)rank);
-    printf("dims[0]: %d\n", (int)dims[0]);
+    // Return struct
+    static struct hdf5_contents contents;
+    contents.file = file;
+    contents.dataset = dataset;
+    contents.dataspace = dataspace;
+    contents.rank = rank;
+    contents.dims = dims;
 
-    // TEST: Read data
-    hsize_t offset[1] = {0};
-    hsize_t count[1] = {10};
+    return (&contents);
+}
 
-    status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, offset, NULL,
+// @brief Fill data_out with contents from the hdf5 dataset, according to offset/count.
+void read_from_dataset(struct hdf5_contents *contents, hsize_t *offset,
+                       hsize_t *count, double *data_out) {
+    // Use hyperslab to read partial file contents out
+    herr_t status;
+    status = H5Sselect_hyperslab(contents->dataspace, H5S_SELECT_SET, offset, NULL,
                                  count, NULL);
-    hid_t memspace = H5Screate_simple(rank, dims, NULL);
+    hid_t memspace = H5Screate_simple(contents->rank, contents->dims, NULL);
     status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, offset, NULL,
                                  count, NULL);
 
-    double *dset_data = malloc(sizeof(double)*10);
-    status = H5Dread(dataset, H5T_NATIVE_DOUBLE, memspace, dataspace,
-		             H5P_DEFAULT, dset_data);
-    for (int i = 0; i < count[0]; i++) {
-        printf("-%e\n", dset_data[i]);
-    }
-
-    H5Dclose(dataset);
-    H5Sclose(dataspace);
+    status = H5Dread(contents->dataset, H5T_NATIVE_DOUBLE, memspace, contents->dataspace,
+		             H5P_DEFAULT, data_out);
+    // Clean up
     H5Sclose(memspace);
-    H5Fclose(file);
+}
+
+void close_hdf5_contents(struct hdf5_contents *contents) {
+    H5Dclose(contents->dataset);
+    H5Sclose(contents->dataspace);
+    H5Fclose(contents->file);
 }

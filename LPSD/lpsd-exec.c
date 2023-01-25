@@ -368,10 +368,10 @@ int main(int argc, char *argv[])
 //    status = H5Sclose(dspace);
 //	status = H5Fclose(h5_file);
 
-    printf("--TEST--");
-    read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/data/local_strain_1243393026_1243509654_256Hz_H1.h5",
-                   "strain");
-    printf("--TEST--");
+//    printf("--TEST--");
+//    read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/data/local_strain_1243393026_1243509654_256Hz_H1.h5",
+//                   "strain");
+//    printf("--TEST--");
 
 	checkParams();
 	memalloc(&cfg, &data);

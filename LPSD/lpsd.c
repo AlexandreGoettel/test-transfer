@@ -20,6 +20,8 @@
 #include <time.h>
 #include <assert.h>
 #include <fftw3.h>
+#include "hdf5.h"
+
 #include "config.h"
 #include "ask.h"
 #include "IO.h"
@@ -697,6 +699,18 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
   read_file ((*cfg).ifn, (*cfg).ulsb, (*data).mean,
 	     (int) ((*cfg).tmin * (*cfg).fsamp), (*data).nread,
 	     (*data).comma);
+    // TEST AREA
+    struct hdf5_contents *contents = read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/examples/dev/H-H1_GWOSC_4KHZ_R1-1248242616-32.h5",
+                                                    "strain");
+    // Strain should be 1-D
+    double *dset_data = (double *) malloc(10*sizeof(double));
+    hsize_t offset[1] = {1};
+    hsize_t count[1] = {1};
+    read_from_dataset(contents, offset, count, dset_data);
+    for (int i = 0; i < 11; i++) printf("\t%e\n", dset_data[i]);
+
+    close_hdf5_contents(contents);
+    // EXIT TEST AREA
 
   if ((*cfg).METHOD == 0)
     {
