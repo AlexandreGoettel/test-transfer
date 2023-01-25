@@ -189,7 +189,7 @@ void do_DFT_iteration(double *segment, double *window_pointer, hsize_t *offset, 
 
 // @brief Calculate DFT over segment, only put max_samples_in_memory at a time
 double process_segment(double *segment, double *window_pointer, int max_samples_in_memory,
-                       int remaining_samples, struct hdf5_contents *contents)
+                       int start, int remaining_samples, struct hdf5_contents *contents)
 {
   hsize_t offset[1], count[1];
 
@@ -206,7 +206,7 @@ double process_segment(double *segment, double *window_pointer, int max_samples_
       remaining_samples -= max_samples_in_memory;
     }
 
-    offset[0] = loop_index * max_samples_in_memory;
+    offset[0] = start + loop_index * max_samples_in_memory;
     do_DFT_iteration(segment, window_pointer, offset, count,
                      contents, &dft_re, &dft_im);
     loop_index++;
@@ -224,7 +224,6 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
   double *dwincs;		/* pointer to array containing window function*cos,window function*sin */
   int i;
   int start;			/* first index in data array */
-  double dft2;			/* sum of real part squared and imag part squared */
   int nsum;			/* number of summands */
   double *winp, *datp;
 
@@ -245,44 +244,31 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
   assert (dwincs != 0);
   makewinsincos (nfft, bin, dwincs, &winsum, &winsum2, &nenbw);
 
-  start = 0;
-  dft2 = 0.;
-  nsum = 1;
 
-  /* calculate first DFT */
+  /* Configure variables for DFT */
   int max_samples_in_memory = 6577770;  // Around 100 MB //TODO: this shouldn't be hard-coded!
   double *window_pointer = dwincs;
   double *strain_data_segment = (double*) xmalloc(max_samples_in_memory * sizeof(double));
 
   // Calculate DFT over first segment
+  start = 0;
+  nsum = 1;
   total = process_segment(strain_data_segment, window_pointer,
-                          max_samples_in_memory, nfft, contents);
+                          max_samples_in_memory, 0, nfft, contents);
 
-  // TODO
-  data = get_data();
-  double dft_re, dft_im;
-  // process other segments if available
+  // Process other segments if available
   start += nfft * (1.0 - (double) (ovlp / 100.));
   while (start + nfft < nread)
     {
       /* calculate DFT */
-      dft_re = dft_im = 0;
-      datp = data + start;
-      winp = dwincs;
-      for (i = 0; i < nfft; i++)
-	{
-	  y = *(datp++);
-	  dft_re += *(winp++) * y;
-	  dft_im += *(winp++) * y;
-	}
-      dft2 = dft_re * dft_re + dft_im * dft_im;
-
-      total += dft2;
+      window_pointer = dwincs;
+      total += process_segment(strain_data_segment, window_pointer,
+                               max_samples_in_memory, start, nfft, contents);
       nsum++;
       start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
     }
 
-  /* return result */
+  /* Return result */
   rslt[0] = total / nsum;
   
   /* This sets the variance to zero. This is not true, but we are not using the variance. */
@@ -629,25 +615,7 @@ calculate_fftw (tCFG * cfg, tDATA * data)
 void
 calculateSpectrum (tCFG * cfg, tDATA * data)
 {
-  /* read data file into memory */
-  /* and subtract mean data value */
-//  printf ("\nReading data, subtracting mean...\n");
   nread = floor (((*cfg).tmax - (*cfg).tmin) * (*cfg).fsamp + 1);
-  read_file ((*cfg).ifn, (*cfg).ulsb, (*data).mean,
-	     (int) ((*cfg).tmin * (*cfg).fsamp), (*data).nread,
-	     (*data).comma);
-//    // TEST AREA
-//    struct hdf5_contents *contents = read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/examples/dev/H-H1_GWOSC_4KHZ_R1-1248242616-32.h5",
-//                                                    "strain");
-//    // Strain should be 1-D
-//    hsize_t offset[1] = {2};
-//    hsize_t count[1] = {2};
-//    double *dset_data = (double *) malloc(count[0]*sizeof(double));
-//    read_from_dataset(contents, offset, count, dset_data);
-//    for (int i = 0; i < 11; i++) printf("\t%e\n", dset_data[i]);
-//
-//    close_hdf5_contents(contents);
-//    // EXIT TEST AREA
 
   if ((*cfg).METHOD == 0)
     {
