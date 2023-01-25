@@ -170,7 +170,7 @@ remove_drift2 (double *a, double *b, double *data, int nfft, int LR)
 }
 
 // @brief Put "count" samples in "segment" (memory), then loop over it to calculate DFT.
-void doDFTIteration(double *segment, double *window_pointer, hsize_t *offset, hsize_t *count,
+void do_DFT_iteration(double *segment, double *window_pointer, hsize_t *offset, hsize_t *count,
                     struct hdf5_contents *contents,
                     double *dft_re, double *dft_im)
 {
@@ -186,6 +186,35 @@ void doDFTIteration(double *segment, double *window_pointer, hsize_t *offset, hs
     }
 }
 
+
+// @brief Calculate DFT over segment, only put max_samples_in_memory at a time
+double process_segment(double *segment, double *window_pointer, int max_samples_in_memory,
+                       int remaining_samples, struct hdf5_contents *contents)
+{
+  hsize_t offset[1], count[1];
+
+  double dft_re, dft_im;	/* Real and imaginary parts of DFT */
+  dft_re = dft_im = 0;
+  int loop_index = 0;  /* Keep track of while loop iterations */
+  while (remaining_samples > 0)
+  {
+    if (remaining_samples < max_samples_in_memory) {
+      count[0] = remaining_samples;
+      remaining_samples = 0;
+    } else {
+      count[0] = max_samples_in_memory;
+      remaining_samples -= max_samples_in_memory;
+    }
+
+    offset[0] = loop_index * max_samples_in_memory;
+    do_DFT_iteration(segment, window_pointer, offset, count,
+                     contents, &dft_re, &dft_im);
+    loop_index++;
+  }
+  return dft_re * dft_re + dft_im * dft_im;
+}
+
+
 //getDFT2 ((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
 //	      (*cfg).LR, &rslt[0], &(*data).avg[k]);
 static void
@@ -194,7 +223,6 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
 {
   double *dwincs;		/* pointer to array containing window function*cos,window function*sin */
   int i;
-  double dft_re, dft_im;	/* real and imaginary part of DFT */
   int start;			/* first index in data array */
   double dft2;			/* sum of real part squared and imag part squared */
   int nsum;			/* number of summands */
@@ -222,40 +250,19 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
   nsum = 1;
 
   /* calculate first DFT */
-  dft_re = dft_im = 0;
-  double *window_pointer = dwincs;
-
   int max_samples_in_memory = 6577770;  // Around 100 MB //TODO: this shouldn't be hard-coded!
+  double *window_pointer = dwincs;
   double *strain_data_segment = (double*) xmalloc(max_samples_in_memory * sizeof(double));
-  int remaining_samples = nfft;
-  int loop_index = 0;
-  hsize_t offset[1], count[1];
 
-  // Loop to calculate DFT over first segment
-  while (remaining_samples > 0)
-  {
-    if (remaining_samples < max_samples_in_memory) {
-      count[0] = remaining_samples;
-      remaining_samples = 0;
-    } else {
-      count[0] = max_samples_in_memory;
-      remaining_samples -= max_samples_in_memory;
-    }
+  // Calculate DFT over first segment
+  total = process_segment(strain_data_segment, window_pointer,
+                          max_samples_in_memory, nfft, contents);
 
-    offset[0] = loop_index * max_samples_in_memory;
-    doDFTIteration(strain_data_segment, window_pointer, offset, count,
-                     contents, &dft_re, &dft_im);
-    loop_index++;
-  }
   // TODO
-  data = get_data ();
-
-  dft2 = dft_re * dft_re + dft_im * dft_im;
-  total = dft2;
-//  printf("mh: %f\n", total);
-
-  start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
-  /* process other segments if available */
+  data = get_data();
+  double dft_re, dft_im;
+  // process other segments if available
+  start += nfft * (1.0 - (double) (ovlp / 100.));
   while (start + nfft < nread)
     {
       /* calculate DFT */
@@ -274,7 +281,6 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
       nsum++;
       start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
     }
-//  printf("mmh: %f\n--------\n", total);
 
   /* return result */
   rslt[0] = total / nsum;
