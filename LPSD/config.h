@@ -4,6 +4,7 @@
 #define LPSD_VERSION "LPSD 28.06.2007"
 
 #define DEFIFN "p5.txt"		/* lpsd.c	- default input file name */
+#define DEFDSET "strain"    /* lpsd.c   - default dataset name */
 #define DEFOFN "%g-%C-lpsd.txt"	/* lpsd.c	- default output file name */
 #define DEFGFN "%g-%C-lpsd.gnu"	/* lpsd.c	- default gnuplot filename */
 #define DEFWFN "FFTW-wisdom"	/* lpsd.c	- default FFTW wisdom file name */
@@ -63,6 +64,7 @@ typedef struct {
 typedef struct {
 	int usedefs;			/* use default values if 1, ask for remaining values otherwise */
 	char ifn[FNLEN];		/* input file name */
+	char dataset_name[FNLEN];      /* dataset name */
 	unsigned short int askifn;
 	char ofn[FNLEN];		/* output file name */
 	unsigned short int askofn;

@@ -183,14 +183,14 @@ double process_segment(double *segment, double *window, int max_samples_in_memor
 
 
 static void
-getDFT2 (char* filename, int nfft, double bin, double fsamp, double ovlp, int LR,
+getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp, double ovlp, int LR,
 	     double *rslt, int *avg)
 {
   double total;		/* Running sum of DFTs */
 
   /* Prepare data */
   // TODO: don't hard-code paths
-  struct hdf5_contents *contents = read_hdf5_file(filename, "strain");
+  struct hdf5_contents *contents = read_hdf5_file(filename, dataset_name);
 
   /* calculate window function */
   // TODO: on the fly?
@@ -339,7 +339,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   /* Start calculation of LPSD from saved checkpoint or zero */
   for (k = k_start; k < (*cfg).nspec; k++)
     {
-      getDFT2((*cfg).ifn, (*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
+      getDFT2((*cfg).ifn, (*cfg).dataset_name, (*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
 	      (*cfg).LR, &rslt[0], &(*data).avg[k]);
 
       (*data).psd[k] = rslt[0];

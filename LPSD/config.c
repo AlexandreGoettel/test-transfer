@@ -108,6 +108,7 @@ static const int ngtlist = sizeof (gtlist) / sizeof (tPARSEPAIR);
 
 static tCFG cfg={usedefs:0,
 		ifn:DEFIFN,
+		dataset_name:DEFDSET,
 		askifn:1,
 		ofn:DEFOFN,
 		askofn:1,

@@ -32,6 +32,7 @@ static struct argp_option options[] = {
 	{"gnuplot", 'g', "gnuplot file",  0, "gnuplot file name",				0},
 	{"method",  'h', "0, 1",   0, "method for frequency calculation: 0-LPSD, 1-FFT",	0},
 	{"input",   'i', "input file",  0, "input file name",					0},
+	{"dataset_name", 'D', "name of HDF5 dataset containing the data", 0, "name of HDF5 dataset containing the data", 0 },
 	{"fres",    'j', "FFT freq. res.", 0, "Frequency resolution for FFT", 			0},
 	{"sbin",    'k', "sbin", 0, "smallest frequency bin",					0},
 	{"ovlp",    'l', "overlap", 0, "segment overlap in %",	 				0},
@@ -87,6 +88,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		strcpy(arguments->ifn,arg);
 		arguments->askifn=0;
 		break;
+	case 'D':
+	    strcpy(arguments->dataset_name, arg);
+        break;
 	case 'j':
 		arguments->fres=atof(arg);
 		arguments->askfres=0;
