@@ -10,8 +10,6 @@
     
  ********************************************************************************/
 #define SINCOS
-#define FAST 1
-
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -88,86 +86,53 @@ static double *dwin;		/* pointer to window function for FFT */
 	if drift removal is selected, a linear regression of data is 
 	performed and the subtracted values are copied to segm
 */
-static void
-remove_drift (double *segm, double *data, int nfft, int LR)
-{
-  int i;
-  long double sx, sy, stt, sty, xm, t;
-  double a,b;
-  if (LR == 2)
-    {				/* subtract straight line through first and last point */
-      a = data[0];
-      b = data[nfft - 1] - data[0] / (double) (nfft - 1.0);
-      for (i = 0; i < nfft; i++)
-	{
-	  segm[i] = data[i] - (a + b * i);
-	}
-    }
-  else if (LR == 1)
-    {				/* linear regression */
-
-      sx = sy = 0;
-      for (i = 0; i < nfft; i++)
-	{
-	  sx += i;
-	  sy += data[i];
-	}
-      xm = sx / nfft;
-      stt = sty = 0;
-      for (i = 0; i < nfft; i++)
-	{
-	  t = i - xm;
-	  stt += t * t;
-	  sty += t * data[i];
-	}
-      b = sty / stt;
-      a = (sy - sx * b) / nfft;
-      for (i = 0; i < nfft; i++)
-	{
-	  segm[i] = data[i] - (a + b * i);
-	}
-    }
-  else if (LR == 0)
-    {				/* copy data */
-      for (i = 0; i < nfft; i++)
-	{
-	  segm[i] = data[i];
-	}
-    }
-}
-
-static void
-remove_drift2 (double *a, double *b, double *data, int nfft, int LR)
-{
-  int i;
-  long double sx, sy, stt, sty, xm, ndbl;
-
-  if (LR == 2)
-    {				/* subtract straight line through first and last point */
-      *a = data[0];
-      *b = data[nfft - 1] - data[0] / (double) (nfft - 1.0);
-    }
-  else if (LR == 1)
-    {				/* linear regression */
-      ndbl = (long double) nfft;
-      xm = (ndbl - 1.0L) / 2.0L;
-      sx = ndbl * xm;
-      stt = (ndbl * ndbl - 1.0L) * ndbl / 12.0L;
-      sy = sty = 0.L;
-      for (i = 0; i < nfft; i++)
-	{
-	  sy += data[i];
-	  sty += (i - xm) * data[i];
-	}
-      *b = sty / stt;
-      *a = (sy - sx * *b) / nfft;
-    }
-  else if (LR == 0)
-    {				/* copy data */
-      *a = 1.0;
-      *b = 0.0;
-    }
-}
+//static void
+//remove_drift (double *segm, double *data, int nfft, int LR)
+//{
+//  int i;
+//  long double sx, sy, stt, sty, xm, t;
+//  double a,b;
+//  if (LR == 2)
+//    {				/* subtract straight line through first and last point */
+//      a = data[0];
+//      b = data[nfft - 1] - data[0] / (double) (nfft - 1.0);
+//      for (i = 0; i < nfft; i++)
+//	{
+//	  segm[i] = data[i] - (a + b * i);
+//	}
+//    }
+//  else if (LR == 1)
+//    {				/* linear regression */
+//
+//      sx = sy = 0;
+//      for (i = 0; i < nfft; i++)
+//	{
+//	  sx += i;
+//	  sy += data[i];
+//	}
+//      xm = sx / nfft;
+//      stt = sty = 0;
+//      for (i = 0; i < nfft; i++)
+//	{
+//	  t = i - xm;
+//	  stt += t * t;
+//	  sty += t * data[i];
+//	}
+//      b = sty / stt;
+//      a = (sy - sx * b) / nfft;
+//      for (i = 0; i < nfft; i++)
+//	{
+//	  segm[i] = data[i] - (a + b * i);
+//	}
+//    }
+//  else if (LR == 0)
+//    {				/* copy data */
+//      for (i = 0; i < nfft; i++)
+//	{
+//	  segm[i] = data[i];
+//	}
+//    }
+//}
 
 // @brief Put "count" samples in "segment" (memory), then loop over it to calculate DFT.
 void do_DFT_iteration(double *segment, double *window_pointer, hsize_t *offset,
@@ -218,15 +183,14 @@ double process_segment(double *segment, double *window, int max_samples_in_memor
 
 
 static void
-getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR,
+getDFT2 (char* filename, int nfft, double bin, double fsamp, double ovlp, int LR,
 	     double *rslt, int *avg)
 {
   double total;		/* Running sum of DFTs */
 
   /* Prepare data */
   // TODO: don't hard-code paths
-  struct hdf5_contents *contents = read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/examples/dev/H-H1_GWOSC_4KHZ_R1-1248242616-32.h5",
-                                                    "strain");
+  struct hdf5_contents *contents = read_hdf5_file(filename, "strain");
 
   /* calculate window function */
   // TODO: on the fly?
@@ -375,7 +339,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   /* Start calculation of LPSD from saved checkpoint or zero */
   for (k = k_start; k < (*cfg).nspec; k++)
     {
-      getDFT2 ((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
+      getDFT2((*cfg).ifn, (*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
 	      (*cfg).LR, &rslt[0], &(*data).avg[k]);
 
       (*data).psd[k] = rslt[0];
