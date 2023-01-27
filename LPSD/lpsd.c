@@ -421,182 +421,182 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 }
 
-void
-calculate_fftw (tCFG * cfg, tDATA * data)
-{
-  int nfft;			/* dimension of DFT */
-  FILE *wfp;
-  fftw_plan plan;
-  double *rawdata;		/* start address of data */
-  double *out;
-  double *segm;			/* contains data of one segment without drift */
-  int i, j;
-  double d;
-  int start;
-  double *west_sumw;
-  double west_q, west_r, west_temp;
-  int navg;
-  double *fft_ps, *fft_varps;
-
-  struct timeval tv;
-  double stt;
-
-  gettimeofday (&tv, NULL);
-  stt = tv.tv_sec + tv.tv_usec / 1e6;
-
-  nfft = (*cfg).nfft;
-
-  dwin = (double *) xmalloc (nfft * sizeof (double));
-  segm = (double *) xmalloc (nfft * sizeof (double));
-  out = (double *) xmalloc (nfft * sizeof (double));
-  west_sumw = (double *) xmalloc ((nfft / 2 + 1) * sizeof (double));
-  fft_ps = (double *) xmalloc ((nfft / 2 + 1) * sizeof (double));
-  fft_varps = (double *) xmalloc ((nfft / 2 + 1) * sizeof (double));
-
-  /* calculate window function */
-  makewin (nfft, 0, dwin, &winsum, &winsum2, &nenbw);
-
-  /* import fftw "wisdom" */
-  if ((wfp = fopen ((*cfg).wfn, "r")) == NULL)
-    message1 ("Cannot open '%s'", (*cfg).wfn);
-  else
-    {
-      if (fftw_import_wisdom_from_file (wfp) == 0)
-	message ("Error importing wisdom");
-      fclose (wfp);
-    }
-  /* plan DFT */
-  printf ("Planning...");
-  fflush (stdout);
-
-  plan = fftw_plan_r2r_1d (nfft, segm, out, FFTW_R2HC, FFTW_ESTIMATE);
-  printf ("done.\n");
-  fflush (stdout);
-
-  rawdata = get_data ();
-  assert (rawdata != 0);
-
-  printf ("Computing output\n");
-
-  /* remove drift from first data segment */
-  remove_drift (&segm[0], &rawdata[0], nfft, (*cfg).LR);
-  /* multiply data with window function */
-  for (i = 0; i < nfft; i++)
-    segm[i] = segm[i] * dwin[i];
-
-  fftw_execute (plan);
-
-  d = 2 * (out[0] * out[0]);
-  (*data).fft_ps[0] = d;
-  west_sumw[0] = 1.;
-  (*data).fft_varps[0] = 0;
-  for (j = 1; j < nfft / 2 + 1; j++)
-    {
-      d = 2 * (out[j] * out[j] + out[nfft - j] * out[nfft - j]);
-      (*data).fft_ps[j] = d;
-      west_sumw[j] = 1.;
-      (*data).fft_varps[j] = 0;
-    }
-  navg = 1;
-  start = nfft * (1.0 - (double) ((*cfg).ovlp / 100.));
-
-  /* remaining segments */
-  while (start + nfft < nread)
-    {
-
-      printf (".");
-      fflush (stdout);
-      if (navg % 75 == 0)
-	printf ("\n");
-
-      navg++;
-      remove_drift (&segm[0], &rawdata[start], nfft, (*cfg).LR);
-
-      /* multiply data with window function */
-      for (i = 0; i < nfft; i++)
-	    segm[i] = segm[i] * dwin[i];
-
-      fftw_execute (plan);
-
-      d = 2 * (out[0] * out[0]);
-      west_q = d - (*data).fft_ps[0];
-      west_temp = west_sumw[0] + 1;
-      west_r = west_q / west_temp;
-      (*data).fft_ps[0] += west_r;
-      (*data).fft_varps[0] += west_r * west_sumw[0] * west_q;
-      west_sumw[0] = west_temp;
-
-      for (j = 1; j < nfft / 2 + 1; j++)
-	{
-	  d = 2 * (out[j] * out[j] + out[nfft - j] * out[nfft - j]);
-	  west_q = d - (*data).fft_ps[j];
-	  west_temp = west_sumw[j] + 1;
-	  west_r = west_q / west_temp;
-	  (*data).fft_ps[j] += west_r;
-	  (*data).fft_varps[j] += west_r * west_sumw[j] * west_q;
-	  west_sumw[j] = west_temp;
-	}
-      start += nfft * (1.0 - (double) ((*cfg).ovlp / 100.));	/* go to next segment */
-    }
-
-  if (navg > 1)
-    {
-      for (i = 0; i < nfft / 2 + 1; i++)
-	{
-	  (*data).fft_varps[i] =
-	    sqrt ((*data).fft_varps[i] / ((double) navg - 1));
-	}
-    }
-  else
-    {
-      for (i = 0; i < nfft / 2 + 1; i++)
-	{
-	  (*data).fft_varps[i] = (*data).fft_ps[i];
-	}
-    }
-  /* normalizations and additional information */
-  j = 0;
-  for (i = 0; i < nfft / 2 + 1; i++)
-    {
-      if (((*cfg).fres * i >= (*cfg).fmin) &&
-	  ((*cfg).fres * i <= (*cfg).fmax) && ((*cfg).sbin <= i))
-	{
-	  (*data).fspec[j] = (*cfg).fres * i;
-	  (*data).ps[j] = (*data).fft_ps[i] / (winsum * winsum);
-	  (*data).varps[j] = (*data).fft_varps[i] / (winsum * winsum);
-	  (*data).psd[j] = (*data).fft_ps[i] / ((*cfg).fsamp * winsum2);
-	  (*data).varpsd[j] = (*data).fft_varps[i] / ((*cfg).fsamp * winsum2);
-	  (*data).avg[j] = navg;
-	  (*data).nffts[j] = nfft;
-	  (*data).bins[j] = (double) i;
-	  j++;
-	}
-    }
-  printf ("done.\n");
-
-  gettimeofday (&tv, NULL);
-  printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - stt + tv.tv_usec / 1e6);
-
-  /* write wisdom to file */
-  if ((wfp = fopen ((*cfg).wfn, "w")) == NULL)
-    message1 ("Cannot open '%s'", (*cfg).wfn);
-  else
-    {
-      fftw_export_wisdom_to_file (wfp);
-      fclose (wfp);
-    }
-  /* clean up */
-  fftw_destroy_plan (plan);
-
-  /* forget wisdom, free memory */
-  fftw_forget_wisdom ();
-  xfree (fft_ps);
-  xfree (fft_varps);
-  xfree (west_sumw);
-  xfree (dwin);
-  xfree (segm);
-  xfree (out);
-}
+//void
+//calculate_fftw (tCFG * cfg, tDATA * data)
+//{
+//  int nfft;			/* dimension of DFT */
+//  FILE *wfp;
+//  fftw_plan plan;
+//  double *rawdata;		/* start address of data */
+//  double *out;
+//  double *segm;			/* contains data of one segment without drift */
+//  int i, j;
+//  double d;
+//  int start;
+//  double *west_sumw;
+//  double west_q, west_r, west_temp;
+//  int navg;
+//  double *fft_ps, *fft_varps;
+//
+//  struct timeval tv;
+//  double stt;
+//
+//  gettimeofday (&tv, NULL);
+//  stt = tv.tv_sec + tv.tv_usec / 1e6;
+//
+//  nfft = (*cfg).nfft;
+//
+//  dwin = (double *) xmalloc (nfft * sizeof (double));
+//  segm = (double *) xmalloc (nfft * sizeof (double));
+//  out = (double *) xmalloc (nfft * sizeof (double));
+//  west_sumw = (double *) xmalloc ((nfft / 2 + 1) * sizeof (double));
+//  fft_ps = (double *) xmalloc ((nfft / 2 + 1) * sizeof (double));
+//  fft_varps = (double *) xmalloc ((nfft / 2 + 1) * sizeof (double));
+//
+//  /* calculate window function */
+//  makewin (nfft, 0, dwin, &winsum, &winsum2, &nenbw);
+//
+//  /* import fftw "wisdom" */
+//  if ((wfp = fopen ((*cfg).wfn, "r")) == NULL)
+//    message1 ("Cannot open '%s'", (*cfg).wfn);
+//  else
+//    {
+//      if (fftw_import_wisdom_from_file (wfp) == 0)
+//	message ("Error importing wisdom");
+//      fclose (wfp);
+//    }
+//  /* plan DFT */
+//  printf ("Planning...");
+//  fflush (stdout);
+//
+//  plan = fftw_plan_r2r_1d (nfft, segm, out, FFTW_R2HC, FFTW_ESTIMATE);
+//  printf ("done.\n");
+//  fflush (stdout);
+//
+//  rawdata = get_data ();
+//  assert (rawdata != 0);
+//
+//  printf ("Computing output\n");
+//
+//  /* remove drift from first data segment */
+//  remove_drift (&segm[0], &rawdata[0], nfft, (*cfg).LR);
+//  /* multiply data with window function */
+//  for (i = 0; i < nfft; i++)
+//    segm[i] = segm[i] * dwin[i];
+//
+//  fftw_execute (plan);
+//
+//  d = 2 * (out[0] * out[0]);
+//  (*data).fft_ps[0] = d;
+//  west_sumw[0] = 1.;
+//  (*data).fft_varps[0] = 0;
+//  for (j = 1; j < nfft / 2 + 1; j++)
+//    {
+//      d = 2 * (out[j] * out[j] + out[nfft - j] * out[nfft - j]);
+//      (*data).fft_ps[j] = d;
+//      west_sumw[j] = 1.;
+//      (*data).fft_varps[j] = 0;
+//    }
+//  navg = 1;
+//  start = nfft * (1.0 - (double) ((*cfg).ovlp / 100.));
+//
+//  /* remaining segments */
+//  while (start + nfft < nread)
+//    {
+//
+//      printf (".");
+//      fflush (stdout);
+//      if (navg % 75 == 0)
+//	printf ("\n");
+//
+//      navg++;
+//      remove_drift (&segm[0], &rawdata[start], nfft, (*cfg).LR);
+//
+//      /* multiply data with window function */
+//      for (i = 0; i < nfft; i++)
+//	    segm[i] = segm[i] * dwin[i];
+//
+//      fftw_execute (plan);
+//
+//      d = 2 * (out[0] * out[0]);
+//      west_q = d - (*data).fft_ps[0];
+//      west_temp = west_sumw[0] + 1;
+//      west_r = west_q / west_temp;
+//      (*data).fft_ps[0] += west_r;
+//      (*data).fft_varps[0] += west_r * west_sumw[0] * west_q;
+//      west_sumw[0] = west_temp;
+//
+//      for (j = 1; j < nfft / 2 + 1; j++)
+//	{
+//	  d = 2 * (out[j] * out[j] + out[nfft - j] * out[nfft - j]);
+//	  west_q = d - (*data).fft_ps[j];
+//	  west_temp = west_sumw[j] + 1;
+//	  west_r = west_q / west_temp;
+//	  (*data).fft_ps[j] += west_r;
+//	  (*data).fft_varps[j] += west_r * west_sumw[j] * west_q;
+//	  west_sumw[j] = west_temp;
+//	}
+//      start += nfft * (1.0 - (double) ((*cfg).ovlp / 100.));	/* go to next segment */
+//    }
+//
+//  if (navg > 1)
+//    {
+//      for (i = 0; i < nfft / 2 + 1; i++)
+//	{
+//	  (*data).fft_varps[i] =
+//	    sqrt ((*data).fft_varps[i] / ((double) navg - 1));
+//	}
+//    }
+//  else
+//    {
+//      for (i = 0; i < nfft / 2 + 1; i++)
+//	{
+//	  (*data).fft_varps[i] = (*data).fft_ps[i];
+//	}
+//    }
+//  /* normalizations and additional information */
+//  j = 0;
+//  for (i = 0; i < nfft / 2 + 1; i++)
+//    {
+//      if (((*cfg).fres * i >= (*cfg).fmin) &&
+//	  ((*cfg).fres * i <= (*cfg).fmax) && ((*cfg).sbin <= i))
+//	{
+//	  (*data).fspec[j] = (*cfg).fres * i;
+//	  (*data).ps[j] = (*data).fft_ps[i] / (winsum * winsum);
+//	  (*data).varps[j] = (*data).fft_varps[i] / (winsum * winsum);
+//	  (*data).psd[j] = (*data).fft_ps[i] / ((*cfg).fsamp * winsum2);
+//	  (*data).varpsd[j] = (*data).fft_varps[i] / ((*cfg).fsamp * winsum2);
+//	  (*data).avg[j] = navg;
+//	  (*data).nffts[j] = nfft;
+//	  (*data).bins[j] = (double) i;
+//	  j++;
+//	}
+//    }
+//  printf ("done.\n");
+//
+//  gettimeofday (&tv, NULL);
+//  printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - stt + tv.tv_usec / 1e6);
+//
+//  /* write wisdom to file */
+//  if ((wfp = fopen ((*cfg).wfn, "w")) == NULL)
+//    message1 ("Cannot open '%s'", (*cfg).wfn);
+//  else
+//    {
+//      fftw_export_wisdom_to_file (wfp);
+//      fclose (wfp);
+//    }
+//  /* clean up */
+//  fftw_destroy_plan (plan);
+//
+//  /* forget wisdom, free memory */
+//  fftw_forget_wisdom ();
+//  xfree (fft_ps);
+//  xfree (fft_varps);
+//  xfree (west_sumw);
+//  xfree (dwin);
+//  xfree (segm);
+//  xfree (out);
+//}
 
 /*
 	works on cfg, data structures of the calling program
@@ -613,6 +613,7 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
     }
   else if ((*cfg).METHOD == 1)
     {
-      calculate_fftw (cfg, data);
+      // calculate_fftw (cfg, data);
+      gerror("Method 1 (fftw) is not implemented in this version.");
     }
 }

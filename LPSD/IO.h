@@ -7,9 +7,6 @@
 // Declarations
 int exists(char *fn);
 void probe_file(unsigned int t, unsigned int A, unsigned int B);
-void read_file(char *ifn, double ulsb, int start, int nread, int comma);
-void close_file();
-double *get_data();
 void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc, char *argv[]);
 int write_gnufile(char *gfn, char *ofn, char *vfn, char *ifn, char *s, 
 			double fmin, double fmax, double dmin, double dmax,

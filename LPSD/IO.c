@@ -223,64 +223,6 @@ void probe_file(unsigned int t, unsigned int A, unsigned int B)
 	if (read_data==NULL) gerror("No file reading routine selected!\n");
 }
 
-/********************************************************************************
- *	reads a data file into memory and multiplies by it by ulsb	
- *		ifn	name of file
- *		ulsb	scaling factor to multiply data with
- *		start	line number of first line to use (beginning with 0)
- *		nread	number of lines to read
- *		comma	if 1, then the decimal point is a comma
- ********************************************************************************
- 	Naming convention	source code	publication
-			 	nread 		N
- ********************************************************************************/
-void read_file(char *ifn, double ulsb, int start, int nread, int comma)
-{
-	int i;
-	int rslt;
-	
-	ifp = fopen(ifn, "r");
-	if (ifp == 0)
-		gerror1("Error opening %s", ifn);
-	data = (double *) xmalloc(nread * sizeof(double));
-	/* check if reading routine has been selected */
-	if (read_data==NULL) gerror("No file reading routine selected!\n");
-
-	/* skip lines before start */
-	for (i = 0; i < start; i++) {
-		if (2==read_lof(comma)) start++;		/* when comment was read, read one more line */
-	}
-	
-	/* read data into data array */
-	for (i = 0; i < nread; i++) {
-		rslt=read_lof(comma);
-		if (2==rslt) i--;				/* when comment was read, read one more line */
-		if (1==rslt) { 					/* if data was read, process it */
-			if (1==read_data())	
-				data[i] = curdata;
-		}	
-	}
-	fclose(ifp);
-	ifp = 0;
-
-}
-
-/*
-	returns start address of data
-*/
-double *get_data()
-{
-	return (&data[0]);
-}
-
-void close_file()
-{
-	if (0 != ifp)
-		fclose(ifp);
-	if (0 != data)
-		xfree(data);
-}
-
 /*
 	writes a comment line to *ofp with information on what quantity will be saved in what column
 	
