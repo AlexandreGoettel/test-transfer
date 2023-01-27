@@ -514,7 +514,7 @@ calculate_fftw (tCFG * cfg, tDATA * data)
 
       /* multiply data with window function */
       for (i = 0; i < nfft; i++)
-	segm[i] = segm[i] * dwin[i];
+	    segm[i] = segm[i] * dwin[i];
 
       fftw_execute (plan);
 

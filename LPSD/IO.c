@@ -244,37 +244,20 @@ int getNoC(char *fn, int *comma)
  *	reads file *fn, counts number of data points and determines mean of data
  *										
  *	Parameters
- *		fn	name of file						
- *		fs	sample frequency
  *		t	1 first column contains time in s
  *		A	number of column to process
  *		B	number of column to process in combination
- *		comma	if 1, then decimal point is a comma
- *										
- *	Returns
- * 		ndata	number of datapoints read
- *		mean	mean value of data points
  ********************************************************************************
  	Naming convention	source code	publication
 				fs		f_s
 				ndata		N
  ********************************************************************************/
-void probe_file(char *fn, double *fs, int *ndata, double *mean, unsigned int t, unsigned int A, unsigned int B, int comma)
+void probe_file(unsigned int t, unsigned int A, unsigned int B)
 {
-	int nread = 0;
-	double lasttime = 0.0;
-	char errmsg[200];
-	
-	*mean = 0.0;
 	timecol=t;
 	colA=A,
 	colB=B;
 
-	/* open file */
-	ifp = fopen(fn, "r");
-	if (ifp == 0)
-		gerror1("Error opening %s", fn);
-	
 	/* select reading routine */
 	if ((timecol==1) & (colB>0)) read_data=read_t_A_B;
 	else if ((timecol==1) & (colB==0)) read_data=read_t_A;
@@ -282,17 +265,12 @@ void probe_file(char *fn, double *fs, int *ndata, double *mean, unsigned int t, 
 	else if ((timecol==0) & (colB==0)) read_data=read_A;
 
 	if (read_data==NULL) gerror("No file reading routine selected!\n");
-
-	/* close file */
-	fclose(ifp);
-	ifp = 0;
 }
 
 /********************************************************************************
  *	reads a data file into memory and multiplies by it by ulsb	
  *		ifn	name of file
- *		ulsb	scaling factor to multiply data with						
- *		mean	mean value of data in file
+ *		ulsb	scaling factor to multiply data with
  *		start	line number of first line to use (beginning with 0)
  *		nread	number of lines to read
  *		comma	if 1, then the decimal point is a comma
@@ -300,7 +278,7 @@ void probe_file(char *fn, double *fs, int *ndata, double *mean, unsigned int t, 
  	Naming convention	source code	publication
 			 	nread 		N
  ********************************************************************************/
-void read_file(char *ifn, double ulsb, double mean, int start, int nread, int comma)
+void read_file(char *ifn, double ulsb, int start, int nread, int comma)
 {
 	int i;
 	int rslt;

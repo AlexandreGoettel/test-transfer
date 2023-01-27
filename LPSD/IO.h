@@ -7,8 +7,8 @@
 // Declarations
 int exists(char *fn);
 int getNoC(char *fn, int *comma);
-void probe_file(char *fn, double *fs, int *ndata, double *mean, unsigned int t, unsigned int A, unsigned int B, int comma);
-void read_file(char *ifn, double ulsb, double mean, int start, int nread, int comma);
+void probe_file(unsigned int t, unsigned int A, unsigned int B);
+void read_file(char *ifn, double ulsb, int start, int nread, int comma);
 void close_file();
 double *get_data();
 void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc, char *argv[]);

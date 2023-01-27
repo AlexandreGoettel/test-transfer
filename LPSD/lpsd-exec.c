@@ -101,16 +101,14 @@ void getUserInput()
 	data.NoC = getNoC(cfg.ifn, &data.comma);
 	if (data.NoC == -1)
 		gerror("File type not recognized!");
-		
-	/* read length of data file and mean data value */
-	printf("Counting data, calculating mean...\n");
-	probe_file(cfg.ifn, &fsamp, &data.ndata, &data.mean, cfg.time, cfg.colA, cfg.colB, data.comma);
+
+	data.mean = 0;  // Strange but ok..
+	probe_file(cfg.time, cfg.colA, cfg.colB);
 	/*
 		if time is contained in first column and sampling frequency is not given on command line
-		then use sampling frequency determined from first column in file
+		then raise error.
 	*/
-	
-	if ((cfg.time==1) && (cfg.cmdfsamp==0)) cfg.fsamp=fsamp;
+	if ((cfg.time==1) && (cfg.cmdfsamp==0)) gerror("No sampling frequency given!");
 
 	if (cfg.askfsamp == 1)
 		askd("Sampling frequency (Hz)", &cfg.fsamp);
@@ -220,15 +218,13 @@ void getDefaultValues()
 	data.NoC = getNoC(cfg.ifn, &data.comma);
 	if (data.NoC == -1)
 	    gerror("File type not recognized!");
-	/* read length of data file and mean data value */
-	printf("Counting data, calculating mean...\n");
-	probe_file(cfg.ifn, &fsamp, &data.ndata, &data.mean, cfg.time, cfg.colA, cfg.colB, data.comma);
+    data.mean = 0;  // Strange but ok
+    probe_file(cfg.time, cfg.colA, cfg.colB);
 	/*
 		if time is contained in first column and sampling frequency is not given on command line
-		then use sampling frequency determined from first column in file
+		then raise error.
 	*/
-	
-	if ((cfg.time==1) && (cfg.cmdfsamp==0)) cfg.fsamp=fsamp;
+	if ((cfg.time==1) && (cfg.cmdfsamp==0)) gerror("No sampling frequency given!");
 
 	if (cfg.tmax < 0) {
 	    cfg.tmax = (double) (data.ndata - 1) / (double) cfg.fsamp;
@@ -305,7 +301,6 @@ void memfree(tCFG *cfg, tDATA * data)
 		xfree((*data).fft_ps);
 		xfree((*data).fft_varps);
 	}
-	close_file();
 }
 
 void checkParams() {
@@ -341,37 +336,11 @@ int main(int argc, char *argv[])
 	getConfig(&cfg);
 	printf("%s",doc);
 	parseArgs(argc, argv, &cfg);
-	if (cfg.usedefs==0) getUserInput();  // TODO: this calls probe_file()
-	else getDefaultValues();  // TODO: this calls probe_file()
+	if (cfg.usedefs==0) getUserInput();
+	else getDefaultValues();
 	getGNUTERM(cfg.gt, &gt);
 	printConfig(&s[0],cfg, wi, gt, data);
 	printf("%s",s);
-
-//    // Test area
-//	herr_t status;
-//	hid_t h5_file = H5Fcreate("file.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-//	hsize_t dims[1];
-//
-//    // Create dataset
-//    dims[0] = 134217728;
-//	hid_t dspace = H5Screate_simple(1, dims, NULL);
-//	hid_t dset = H5Dcreate (h5_file, "/dset", H5T_STD_I32BE, dspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-//
-//	// Write to dataset
-//	int N = 134217728;
-//	double *dset_data = malloc(sizeof(double)*N);
-//	for (int i = 0; i < 134217728; i++) dset_data[i] = i;
-//	status = H5Dwrite (dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, dset_data);
-//
-//    // Close
-//    status = H5Dclose(dset);
-//    status = H5Sclose(dspace);
-//	status = H5Fclose(h5_file);
-
-//    printf("--TEST--");
-//    read_hdf5_file("/home/alexandre/work/cardiff/LPSD/Scalar-Dark-Matter-LPSD/data/local_strain_1243393026_1243509654_256Hz_H1.h5",
-//                   "strain");
-//    printf("--TEST--");
 
 	checkParams();
 	memalloc(&cfg, &data);
