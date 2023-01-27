@@ -6,7 +6,6 @@
 
 // Declarations
 int exists(char *fn);
-int getNoC(char *fn, int *comma);
 void probe_file(unsigned int t, unsigned int A, unsigned int B);
 void read_file(char *ifn, double ulsb, int start, int nread, int comma);
 void close_file();

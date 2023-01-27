@@ -109,22 +109,3 @@ void parse_op(char *s, char *ofn) {
 	rplStr(s,"%o",ofn);
 	rplStr(s,"%p",ofnb);
 }
-
-/*
-int main() {
-	char ifn[FNLEN] = "my.cal.txt";
-	char ofn[FNLEN] = "%g-lpsd-%g.txt%g";
-	char ifnb[FNLEN];
-	
-	basename(ifn,ifnb);
-	printf("ifn=%s\n",ifn);
-	printf("ifnb=%s\n",ifnb);
-	printf("ofn=%s\n",ofn);
-	printf("VarInStr(ofn)=%d\n",VarInStr(ofn));
-	rplStr(ofn,"%g",ifnb);
-	printf("ofn=%s\n",ofn);
-	printf("VarInStr(ofn)=%d\n",VarInStr(ofn));
-	return(0);
-
-}
-*/

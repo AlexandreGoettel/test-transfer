@@ -195,50 +195,6 @@ int exists(char *fn)
 	return (ok);
 }
 
-/********************************************************************************
- *	opens a file and returns the number of its columns
- *
- *	recognized formats:
- *
- *		y
- *		y y
- *		y y y....
- *
- *	Parameter
- *		fn	name of file
- *		comma	1 if comma is used as decimal point, 0 otherwise
- *	Returns	
- *		-1	file type not detected	
- *		0	t y text file
- *		1	y text file
- *
- *	delimiters after the last column confuse getNoC - they get counted as
- *	another column
- ********************************************************************************/
-int getNoC(char *fn, int *comma)
-{
-	FILE *fp;
-	char s[DATALEN];
-	int n=-1;
-	char *col;
-	
-	fp = fopen(fn, "rb");
-	if (fp != 0) {
-		fgets(s, DATALEN, fp);	/* read max. DATALEN-1 characters */
-		/* first line of file has been read */
-		*comma = (int) strchr(s, ',') ? 1 : 0;
-		/* replace commas by decimal points */
-		if (*comma == 1) replaceComma(s);
-		/* how many columns does file have? */
-		col=strtok(s,DATADEL);			/* ATTENTION: s gets altered by strtok */
-		if (col!=NULL) {
-			for (n=1; ((col=strtok(NULL,DATADEL))!=NULL);n++);
-		} else n=0;
-		fclose(fp);
-//		printf("Number of columns: %d\n",n);
-	}
-	return (n);
-}
 
 /********************************************************************************
  *	reads file *fn, counts number of data points and determines mean of data

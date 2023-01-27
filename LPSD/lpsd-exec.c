@@ -98,10 +98,6 @@ void getUserInput()
 	if (cfg.askgfn == 1)
 		asks("Gnuplot file", cfg.gfn);
 
-	data.NoC = getNoC(cfg.ifn, &data.comma);
-	if (data.NoC == -1)
-		gerror("File type not recognized!");
-
 	data.mean = 0;  // Strange but ok..
 	probe_file(cfg.time, cfg.colA, cfg.colB);
 	/*
@@ -215,9 +211,6 @@ void getDefaultValues()
 	parse_fgsC(cfg.ofn,cfg.ifn,cfg.param,cfg.colA,cfg.colB);
 	parse_fgsC(cfg.gfn,cfg.ifn,cfg.param,cfg.colA,cfg.colB);
 	parse_op(cfg.gfn,cfg.ofn);
-	data.NoC = getNoC(cfg.ifn, &data.comma);
-	if (data.NoC == -1)
-	    gerror("File type not recognized!");
     data.mean = 0;  // Strange but ok
     probe_file(cfg.time, cfg.colA, cfg.colB);
 	/*
