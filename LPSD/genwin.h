@@ -9,6 +9,8 @@ void set_window (int type, double req_psll, char *name, double *psll,
 
 void makewinsincos (int nfft, double bin, double *win, double *winsum,
 		    double *winsum2, double *nenbw);
+void makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
+		    double *winsum2, double *nenbw, int, int);
 
 void makewin (int nfft, int half, double *win, double *winsum,
 	      double *winsum2, double *nenbw);

@@ -594,11 +594,23 @@ set_window (int type, double req_psll, char *name, double *psll, double *rov,
     gerror ("illegal window type");
 }
 
-
+// @brief Wrapper for makewinsincos_indexed
+// @brief Calling this function will simply create the window for the entire segment
 void
 makewinsincos (int nfft, double bin, double *win, double *winsum,
-	       double *winsum2, double *nenbw)
+               double *winsum2, double *nenbw)
 {
+    makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft);
+}
+
+// @brief Construct window from "start_index" on, for "count" bins
+// @brief Other parameters are from legacy code
+void
+makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
+	       double *winsum2, double *nenbw, int start_index, int count)
+{
+  // Make sure that the function was called correctly
+  assert(start_index + count <= nfft);
   int j;
   double kaiser_scal = 1, z;
   double winval;
@@ -611,7 +623,7 @@ makewinsincos (int nfft, double bin, double *win, double *winsum,
   if (win_no == -1)
     kaiser_scal = netlibi0 (M_PI * win_alpha);
   fact = 2.0 * M_PI * bin / ((double) nfft);
-  for (j = 0; j < nfft; j++)
+  for (j = start_index; j < start_index + count; j++)
     {
       if (win_no == -1)
 	{			/* Kaiser */
