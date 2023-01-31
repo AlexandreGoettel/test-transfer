@@ -190,6 +190,7 @@ getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
 
   /* Prepare data */
   // TODO: don't hard-code paths
+  // TODO: this opens the file for each iteration.. ok?
   struct hdf5_contents *contents = read_hdf5_file(filename, dataset_name);
 
   /* calculate window function */
@@ -200,8 +201,10 @@ getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
 
 
   /* Configure variables for DFT */
-//  int max_samples_in_memory = 6577770;  // Around 100 MB //TODO: this shouldn't be hard-coded!
-  int max_samples_in_memory = 500;  // tmp
+  int max_samples_in_memory = 5*6577770;  // Around 500 MB //TODO: this shouldn't be hard-coded!
+
+  if (max_samples_in_memory > nfft) max_samples_in_memory = nfft; // Don't allocate more than you need
+//  int max_samples_in_memory = 500;  // tmp
   double *strain_data_segment = (double*) xmalloc(max_samples_in_memory * sizeof(double));
 
   // Calculate DFT over first segment
@@ -237,7 +240,8 @@ getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
   *avg = nsum;
 
   /* clean up */
-  xfree (window);
+  xfree(window);
+  xfree(strain_data_segment);
   close_hdf5_contents(contents);
 }
 
