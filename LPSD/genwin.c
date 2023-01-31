@@ -600,48 +600,50 @@ void
 makewinsincos (int nfft, double bin, double *win, double *winsum,
                double *winsum2, double *nenbw)
 {
-    makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft);
+    makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft, true);
 }
 
 // @brief Construct window from "start_index" on, for "count" bins
 // @brief Other parameters are from legacy code
+// @param reset_sums Set winsum,winsum2 back to zero before loop
 void
 makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
-	       double *winsum2, double *nenbw, int start_index, int count)
+	       double *winsum2, double *nenbw, int start_index, int count,
+	       bool reset_sums)
 {
   // Make sure that the function was called correctly
-  assert(start_index + count <= nfft);
-  int j;
   double kaiser_scal = 1, z;
   double winval;
   double fact, arg;
   double s,c;
 
-  *winsum = *winsum2 = 0;
+  if (reset_sums) *winsum = *winsum2 = 0;
+
   if (win_no == -2)
     gerror ("set_window has not been called.");
+
   if (win_no == -1)
     kaiser_scal = netlibi0 (M_PI * win_alpha);
+
   fact = 2.0 * M_PI * bin / ((double) nfft);
-  for (j = start_index; j < start_index + count; j++)
+  for (int j = start_index; j < start_index + count; j++)
     {
       if (win_no == -1)
-	{			/* Kaiser */
-	  z = 2. * (double) j / (double) nfft - 1.;
-	  winval =
-	    netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
-	}
+      {			/* Kaiser */
+        z = 2. * (double) j / (double) nfft - 1.;
+        winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
+      }
       else
-	{
-	  z = (double) j / (double) nfft;
-	  winval = (*(winlist[win_no].winfun)) (z);
-	}
+      {
+        z = (double) j / (double) nfft;
+        winval = (*(winlist[win_no].winfun)) (z);
+      }
       *winsum += winval;
       *winsum2 += winval * winval;
 
       arg = fact * (double) j;
 #ifdef SINCOS
-    asm ("fsincos": "=t" (c), "=u" (s):"0" (arg));
+      asm ("fsincos": "=t" (c), "=u" (s):"0" (arg));
 #else
       s = sin (arg);
       c = cos (arg);
