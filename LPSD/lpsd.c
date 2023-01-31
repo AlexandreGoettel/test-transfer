@@ -148,6 +148,7 @@ void do_DFT_iteration(double *segment, double *window_pointer, hsize_t *offset,
 
     // Loop over data to calculate DFT
     double sample;
+    register int i;
     for (int i = 0; i < (int)count[0]; i++) {
         sample = segment[i];
         *dft_re += window_pointer[i*2] * sample;

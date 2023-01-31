@@ -615,44 +615,47 @@ makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
   double kaiser_scal = 1, z;
   double winval;
   double fact, arg;
-  double s,c;
+  register int j;
 
   if (reset_sums) *winsum = *winsum2 = 0;
 
   if (win_no == -2)
     gerror ("set_window has not been called.");
 
-  if (win_no == -1)
+  fact = 2.0 * M_PI * bin / ((double) nfft);
+  if (win_no == -1)  /* Kaiser */
+  {
     kaiser_scal = netlibi0 (M_PI * win_alpha);
 
-  fact = 2.0 * M_PI * bin / ((double) nfft);
-  for (int j = start_index; j < start_index + count; j++)
+    for (j = start_index; j < start_index + count; j++)
     {
-      if (win_no == -1)
-      {			/* Kaiser */
-        z = 2. * (double) j / (double) nfft - 1.;
-        winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
-      }
-      else
-      {
-        z = (double) j / (double) nfft;
-        winval = (*(winlist[win_no].winfun)) (z);
-      }
+      z = 2. * (double) j / (double) nfft - 1.;
+      winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
+
       *winsum += winval;
       *winsum2 += winval * winval;
-
       arg = fact * (double) j;
-#ifdef SINCOS
-      asm ("fsincos": "=t" (c), "=u" (s):"0" (arg));
-#else
-      s = sin (arg);
-      c = cos (arg);
-#endif
-      *(win++) = c*winval;
-      *(win++) = -s*winval;
+
+      *(win++) = cos(arg)*winval;
+      *(win++) = -sin(arg)*winval;
     }
+  } else {
+    for (j = start_index; j < start_index + count; j++)
+    {
+      z = (double) j / (double) nfft;
+      winval = (*(winlist[win_no].winfun)) (z);
+
+      *winsum += winval;
+      *winsum2 += winval * winval;
+      arg = fact * (double) j;
+
+      *(win++) = cos(arg)*winval;
+      *(win++) = -sin(arg)*winval;
+    }
+  }
   *nenbw = nfft * *winsum2 / (*winsum * *winsum);
 }
+
 
 void
 makewin (int nfft, int half, double *win, double *winsum, double *winsum2,
