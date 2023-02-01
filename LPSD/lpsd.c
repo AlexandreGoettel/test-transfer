@@ -141,40 +141,14 @@ void process_memory_unit(double *segment, double *window, int memory_unit_index,
                          struct hdf5_contents *contents, double ovlp,
                          double *dft_results)
 {
-  // Calculate window
-  makewinsincos_indexed(total_samples, bin, window, &winsum, &winsum2, &nenbw,
-                        window_offset, count, window_offset == 0);
 
-  // Loop over data segments
-  int start = 0;
-  register int nsum = 0;
-  hsize_t data_count[1] = {count};
-  while (start + total_samples < nread)
-  {
-    // Load data
-    hsize_t data_offset[1] = {start + window_offset};
-    read_from_dataset(contents, data_offset, data_count, segment);
-
-    // Calculate DFT
-    register int i;
-    for (i = 0; i < count; i++) {
-      dft_results[nsum*2] += window[i*2] * segment[i];
-      dft_results[nsum*2+1] += window[i*2 + 1] * segment[i];
-    }
-    start += total_samples * (1.0 - (double) (ovlp / 100.));  /* go to next segment */
-    nsum++;
-  }
 }
 
 
 static void
-getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
-         double ovlp, int LR, double *rslt, int *avg)
+getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR, double *rslt,
+         int *avg, struct hdf5_contents *contents)
 {
-  /* Prepare data */
-  // TODO: this opens the file for each iteration.. ok?
-  struct hdf5_contents *contents = read_hdf5_file(filename, dataset_name);
-
   /* Configure variables for DFT */
 //  int max_samples_in_memory = 5*6577770;  // Around 500 MB //TODO: this shouldn't be hard-coded!
   int max_samples_in_memory = 512;  // tmp
@@ -187,7 +161,7 @@ getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
 
   //////////////////////////////////////////////////
   /* Calculate DFT over separate memory windows */
-  int offset, count;
+  int window_offset, count;
   int memory_unit_index = 0;
   int remaining_samples = nfft;
   int nsum = floor(1+(nread - nfft) / floor(nfft * (1.0 - (double) (ovlp / 100.))));
@@ -207,10 +181,32 @@ getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
       count = remaining_samples;
       remaining_samples = 0;
     }
-    offset = memory_unit_index * max_samples_in_memory;
-    process_memory_unit(strain_data_segment, window, memory_unit_index, nfft,
-                        count, offset, bin, contents, ovlp, dft_results);
+    window_offset = memory_unit_index * max_samples_in_memory;
     memory_unit_index++;
+
+    // Calculate window
+    makewinsincos_indexed(nfft, bin, window, &winsum, &winsum2, &nenbw,
+                        window_offset, count, window_offset == 0);
+
+    // Loop over data segments
+    int start = 0;
+    register int _nsum = 0;
+    hsize_t data_count[1] = {count};
+    while (start + nfft < nread)
+    {
+    // Load data
+    hsize_t data_offset[1] = {start + window_offset};
+    read_from_dataset(contents, data_offset, data_count, strain_data_segment);
+
+    // Calculate DFT
+    register int i;
+    for (i = 0; i < count; i++) {
+      dft_results[_nsum*2] += window[i*2] * strain_data_segment[i];
+      dft_results[_nsum*2+1] += window[i*2 + 1] * strain_data_segment[i];
+    }
+    start += nfft * (1.0 - (double) (ovlp / 100.));  /* go to next segment */
+    _nsum++;
+    }
   }
 
   /* Sum over dft_results to get total */
@@ -239,7 +235,6 @@ getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
   /* clean up */
   xfree(window);
   xfree(strain_data_segment);
-  close_hdf5_contents(contents);
 }
 
 
@@ -338,10 +333,11 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   print = start;
   
   /* Start calculation of LPSD from saved checkpoint or zero */
+  struct hdf5_contents *contents = read_hdf5_file((*cfg).ifn, (*cfg).dataset_name);
   for (k = k_start; k < (*cfg).nspec; k++)
     {
-      getDFT2((*cfg).ifn, (*cfg).dataset_name, (*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
-	      (*cfg).LR, &rslt[0], &(*data).avg[k]);
+      getDFT2((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
+	      (*cfg).LR, &rslt[0], &(*data).avg[k], contents);
 
       (*data).psd[k] = rslt[0];
       (*data).varpsd[k] = rslt[1];
@@ -380,6 +376,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
       }
     }
   /* finish */
+  close_hdf5_contents(contents);
   printf ("\b\b\b\b\b\b  100%%\n");
   fflush (stdout);
   gettimeofday (&tv, NULL);
