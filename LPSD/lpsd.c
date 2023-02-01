@@ -134,57 +134,36 @@ static double *dwin;		/* pointer to window function for FFT */
 //    }
 //}
 
-// @brief Put "count" samples in "segment" (memory), then loop over it to calculate DFT.
-void do_DFT_iteration(double *segment, double *window_pointer, hsize_t *offset,
-                      int offset_window, hsize_t *count, double bin, int total_samples,
-                      struct hdf5_contents *contents, double *dft_re, double *dft_im)
+
+// @brief Calculate DFT contributions from memory-segment-long window units
+void process_memory_unit(double *segment, double *window, int memory_unit_index,
+                         int total_samples, int count, int window_offset, double bin,
+                         struct hdf5_contents *contents, double ovlp,
+                         double *dft_results)
 {
-    // Put strain data in memory
-    read_from_dataset(contents, offset, count, segment);
+  // Calculate window
+  makewinsincos_indexed(total_samples, bin, window, &winsum, &winsum2, &nenbw,
+                        window_offset, count, window_offset == 0);
 
-    // Calculate window
-    makewinsincos_indexed(total_samples, bin, window_pointer, &winsum, &winsum2,
-                          &nenbw, offset_window, (int)count[0], offset_window == 0);
-
-    // Loop over data to calculate DFT
-    double sample;
-    register int i;
-    for (int i = 0; i < (int)count[0]; i++) {
-        sample = segment[i];
-        *dft_re += window_pointer[i*2] * sample;
-        *dft_im += window_pointer[i*2 + 1] * sample;
-    }
-}
-
-
-// @brief Calculate DFT over segment, only put max_samples_in_memory at a time
-double process_segment(double *segment, double *window, int max_samples_in_memory,
-                       int start, int remaining_samples, double bin, struct hdf5_contents *contents)
-{
-  int loop_index = 0;  /* Keep track of while loop iterations */
-  double dft_re, dft_im;	/* Real and imaginary parts of DFT */
-  dft_re = dft_im = 0;
-  hsize_t offset[1], count[1];
-  int offset_window;
-  int total_samples = remaining_samples;  /* To normalise window */
-
-  while (remaining_samples > 0)
+  // Loop over data segments
+  int start = 0;
+  register int nsum = 0;
+  hsize_t data_count[1] = {count};
+  while (start + total_samples < nread)
   {
-    if (remaining_samples < max_samples_in_memory) {
-      count[0] = remaining_samples;
-      remaining_samples = 0;
-    } else {
-      count[0] = max_samples_in_memory;
-      remaining_samples -= max_samples_in_memory;
-    }
+    // Load data
+    hsize_t data_offset[1] = {start + window_offset};
+    read_from_dataset(contents, data_offset, data_count, segment);
 
-    offset[0] = start + loop_index * max_samples_in_memory;
-    offset_window =  loop_index * max_samples_in_memory;
-    do_DFT_iteration(segment, window, offset, offset_window, count, bin,
-                     total_samples, contents, &dft_re, &dft_im);
-    loop_index++;
+    // Calculate DFT
+    register int i;
+    for (i = 0; i < count; i++) {
+      dft_results[nsum*2] += window[i*2] * segment[i];
+      dft_results[nsum*2+1] += window[i*2 + 1] * segment[i];
+    }
+    start += total_samples * (1.0 - (double) (ovlp / 100.));  /* go to next segment */
+    nsum++;
   }
-  return dft_re * dft_re + dft_im * dft_im;
 }
 
 
@@ -192,15 +171,13 @@ static void
 getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
          double ovlp, int LR, double *rslt, int *avg)
 {
-  double total;		/* Running sum of DFTs */
-
   /* Prepare data */
   // TODO: this opens the file for each iteration.. ok?
   struct hdf5_contents *contents = read_hdf5_file(filename, dataset_name);
 
   /* Configure variables for DFT */
 //  int max_samples_in_memory = 5*6577770;  // Around 500 MB //TODO: this shouldn't be hard-coded!
-  int max_samples_in_memory = 500;  // tmp
+  int max_samples_in_memory = 512;  // tmp
   if (max_samples_in_memory > nfft) max_samples_in_memory = nfft; // Don't allocate more than you need
 
   /* Allocate data and window memory segments */
@@ -208,22 +185,41 @@ getDFT2 (char* filename, char* dataset_name, int nfft, double bin, double fsamp,
   double *window = (double*) xmalloc(2*max_samples_in_memory * sizeof(double));
   assert(window != 0 && strain_data_segment != 0);
 
-  // Calculate DFT over first segment
-  int start = 0;
-  int nsum = 1;
-  total = process_segment(strain_data_segment, window, max_samples_in_memory,
-                          start, nfft, bin, contents);
+  //////////////////////////////////////////////////
+  /* Calculate DFT over separate memory windows */
+  int offset, count;
+  int memory_unit_index = 0;
+  int remaining_samples = nfft;
+  int nsum = floor(1+(nread - nfft) / floor(nfft * (1.0 - (double) (ovlp / 100.))));
+  int tmp = (nsum-1)*floor(nfft * (1.0 - (double) (ovlp / 100.)))+nfft;
+  if (tmp == nread) nsum--;  /* Adjust for edge case */
 
-  // Process other segments if available
-  start += nfft * (1.0 - (double) (ovlp / 100.));
-  while (start + nfft < nread)
+  double dft_results[2*nsum];  /* Real and imaginary parts of DFTs */
+  memset(dft_results, 0, 2*nsum*sizeof(double));
+
+  while (remaining_samples > 0)
+  {
+    if (remaining_samples > max_samples_in_memory)
     {
-      /* Calculate DFT */
-      total += process_segment(strain_data_segment, window, max_samples_in_memory,
-                               start, nfft, bin, contents);
-      nsum++;
-      start += nfft * (1.0 - (double) (ovlp / 100.));	/* go to next segment */
+      count = max_samples_in_memory;
+      remaining_samples -= max_samples_in_memory;
+    } else {
+      count = remaining_samples;
+      remaining_samples = 0;
     }
+    offset = memory_unit_index * max_samples_in_memory;
+    process_memory_unit(strain_data_segment, window, memory_unit_index, nfft,
+                        count, offset, bin, contents, ovlp, dft_results);
+    memory_unit_index++;
+  }
+
+  /* Sum over dft_results to get total */
+  register int i;
+  double total = 0;  /* Running sum of DFTs */
+  for (i = 0; i < nsum; i++) {
+    total += dft_results[i*2]*dft_results[i*2] + dft_results[i*2+1]*dft_results[i*2+1];
+  }
+  //////////////////////////////////////////////////
 
   /* Return result */
   rslt[0] = total / nsum;
