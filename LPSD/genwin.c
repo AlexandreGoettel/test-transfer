@@ -603,6 +603,7 @@ makewinsincos (int nfft, double bin, double *win, double *winsum,
     makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft, true);
 }
 
+
 // @brief Construct window from "start_index" on, for "count" bins
 // @brief Other parameters are from legacy code
 // @param reset_sums Set winsum,winsum2 back to zero before loop
@@ -612,7 +613,7 @@ makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
 	       bool reset_sums)
 {
   // Make sure that the function was called correctly
-  double kaiser_scal = 1, z;
+  double z;
   double winval;
   double fact, arg;
   register int j;
@@ -625,7 +626,7 @@ makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
   fact = 2.0 * M_PI * bin / ((double) nfft);
   if (win_no == -1)  /* Kaiser */
   {
-    kaiser_scal = netlibi0 (M_PI * win_alpha);
+    double kaiser_scal = netlibi0 (M_PI * win_alpha);
 
     for (j = start_index; j < start_index + count; j++)
     {
@@ -657,62 +658,40 @@ makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
 }
 
 
+// @brief Similar to makewinsincos, but leave the exponential term calculation out
 void
-makewin (int nfft, int half, double *win, double *winsum, double *winsum2,
-	 double *nenbw)
+makewin (int nfft, double *win, double *winsum,
+         double *winsum2, double *nenbw)
 {
-  int j;
-  double kaiser_scal = 1, z;
-
+  register int j;
+  double z, winval;
   *winsum = *winsum2 = 0;
+
   if (win_no == -2)
     gerror ("set_window has not been called.");
-  if (half && nfft % 2)
-    gerror ("'half=YES' can only be used for even NFFT.");
-  if (win_no == -1)
-    kaiser_scal = netlibi0 (M_PI * win_alpha);
-  for (j = 0; j <= nfft / 2; j++)
+  if (win_no == -1)  /* Kaiser */
+  {
+    double kaiser_scal = netlibi0 (M_PI * win_alpha);
+
+    for (j = 0; j <= nfft; j++)
     {
-      if (win_no == -1)
-	{			/* Kaiser */
-	  z = 2. * (double) j / (double) nfft - 1.;
-	  win[j] =
-	    netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
-	}
-      else
-	{
-	  z = (double) j / (double) nfft;
-	  win[j] = (*(winlist[win_no].winfun)) (z);
-	}
-      *winsum += win[j];
-      *winsum2 += win[j] * win[j];
+      z = 2. * (double) j / (double) nfft - 1.;
+      winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
+
+      *winsum += winval;
+      *winsum2 += winval * winval;
+      *(win++) = winval;
     }
-  if (half)			/* add missing items to winsum */
+  } else {
+    for (j = 0; j <= nfft; j++)
     {
-      for (j = 1; j < nfft / 2; j++)
-	{
-	  *winsum += win[j];
-	  *winsum2 += win[j] * win[j];
-	}
+      z = (double) j / (double) nfft;
+	  winval = (*(winlist[win_no].winfun)) (z);
+
+	  *winsum += winval;
+      *winsum2 += winval * winval;
+      *(win++) = winval;
     }
-  else				/* fill up rest of array */
-    {
-      for (j = nfft / 2 + 1; j < nfft; j++)
-	{
-	  if (win_no == -1)
-	    {			/* Kaiser */
-	      z = 2. * (double) j / (double) nfft - 1.;
-	      win[j] =
-		netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
-	    }
-	  else
-	    {
-	      z = (double) j / (double) nfft;
-	      win[j] = (*(winlist[win_no].winfun)) (z);
-	    }
-	  *winsum += win[j];
-	  *winsum2 += win[j] * win[j];
-	}
-    }
+  }
   *nenbw = nfft * *winsum2 / (*winsum * *winsum);
 }

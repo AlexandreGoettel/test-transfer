@@ -8,5 +8,6 @@ static void getDFT2(int, double, double, double, int,
                     double*, int*, struct hdf5_contents*);
 
 void calculate_fft_approx(tCFG*, tDATA*);
+void FFT(double*, int, double*);
 
 #endif

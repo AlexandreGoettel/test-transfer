@@ -14,7 +14,7 @@ void makewinsincos (int nfft, double bin, double *win, double *winsum,
 void makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
 		    double *winsum2, double *nenbw, int, int, bool);
 
-void makewin (int nfft, int half, double *win, double *winsum,
-	      double *winsum2, double *nenbw);
+void makewin (int nfft, double *win, double *winsum,
+              double *winsum2, double *nenbw);
 
 #endif

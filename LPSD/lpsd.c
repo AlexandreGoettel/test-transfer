@@ -123,7 +123,7 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR, double *rslt,
 
     // Calculate window
     makewinsincos_indexed(nfft, bin, window, &winsum, &winsum2, &nenbw,
-                        window_offset, count, window_offset == 0);
+                          window_offset, count, window_offset == 0);
 
     // Loop over data segments
     int start = 0;
@@ -179,27 +179,17 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR, double *rslt,
 
 /*
 	calculates paramaters for DFTs
-	
-	input
-		nread		number of data
-		fsamp		sampling frequency
-		ndiv		desired number of entries in spectrum
-		sollavg		desired number of averages
 	output
-		ndiv		actual number of entries in spectrum
 		fspec		frequencies in spectrum
 		bins		bins for DFTs
 		nffts		dimensions for DFTs
  ********************************************************************************
  	Naming convention	source code	publication
-				i		j
-				fresc		r_{min}
-				fresb		r_{avg}
-				fresa		r'
-				fres		r''
-				ndft		L(j)
-				bin		m(j)
- ********************************************************************************/
+        i		    j
+        fres	    r''
+        ndft	    L(j)
+        bin		    m(j)
+ */
 static void
 calc_params (tCFG * cfg, tDATA * data)
 {
@@ -316,94 +306,111 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
 }
 
 
+double get_mean(int* values, int N) {
+    double _sum = 0;
+    register int i;
+    for (i = 0; i < N; i++) {
+        _sum += values[i];
+    }
+    return _sum / N;
+}
+
+
 // @brief Use FFT approximation to calculate LPSD much faster, but at a certain cost of precision
+// @brief For now, just run over all frequency bins
+// @brief In the future, this can be parallelized by splitting which segments are calculated?
+// @brief though it would require a final job to average etc.
 void
 calculate_fft_approx (tCFG * cfg, tDATA * data)
 {
-  int k;			/* 0..nspec */
-  int k_start = 0;		/* N. lines in save file. Post fail start point */
-  char ch;			/* For scanning through checkpointing file */
-  int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
-  int j; 			/* Iteration variables for checkpointing data */
-  FILE * file1;			/* Output file, temp for checkpointing */
-  double rslt[4];		/* rslt[0]=PSD, rslt[1]=variance(PSD) rslt[2]=PS rslt[3]=variance(PS) */
-  double progress;
+    // User output
+    struct timeval tv;
+    int Nsave = (*cfg).nspec / 100;
+    printf ("Checkpointing every %i iterations\n", Nsave);
+    printf ("Computing output:  00.0%%");
+    fflush (stdout);
+    gettimeofday (&tv, NULL);
+    double start = tv.tv_sec + tv.tv_usec / 1e6;
+    double now, print;
+    print = now = start;
 
-  struct timeval tv;
-  double start, now, print;
+    // Start LPSD calculation
+    struct hdf5_contents *contents = read_hdf5_file((*cfg).ifn, (*cfg).dataset_name);
 
-  /* Check output file for saved checkpoint */
-  file1 = fopen((*cfg).ofn, "r");
-  if (file1){
-      while((ch=fgetc(file1)) != EOF){
-          if(ch == '\n'){
-              k_start++;
-          }
-      }
-  fclose(file1);
-  printf("Backup collected. Starting from k = %i\n", k_start);
-  }
-  else{
-      printf("No backup file. Starting from fmin\n");
-      k_start = 0;
-  }
-  printf ("Checkpointing every %i iterations\n", Nsave);
-  printf ("Computing output:  00.0%%");
-  fflush (stdout);
-  gettimeofday (&tv, NULL);
-  start = tv.tv_sec + tv.tv_usec / 1e6;
-  now = start;
-  print = start;
+    // For reference, calculate FFT for each segment
+    // Assume that all segments have the same length: mean of nffts
+    int n_frequency_bins = cfg->nspec;
+    int segment_length = round(get_mean(data->nffts, n_frequency_bins));
+    int delta_segment = floor(segment_length * (1.0 - (double) (cfg->ovlp / 100.)));
+    int n_segments = floor(1 + (nread - segment_length ) / delta_segment);
+    /* Adjust for edge case */
+    int tmp = (n_segments - 1)*delta_segment + segment_length;
+    if (tmp == nread) n_segments--;
 
-  /* Start calculation of LPSD from saved checkpoint or zero */
-  struct hdf5_contents *contents = read_hdf5_file((*cfg).ifn, (*cfg).dataset_name);
-  for (k = k_start; k < (*cfg).nspec; k++)
-    {
-      getDFT2((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
-	      (*cfg).LR, &rslt[0], &(*data).avg[k], contents);
+    double *strain_data_segment = (double*) xmalloc(segment_length*sizeof(double));
+    double *window = (double*) xmalloc(2*segment_length*sizeof(double));
 
-      (*data).psd[k] = rslt[0];
-      (*data).varpsd[k] = rslt[1];
-      (*data).ps[k] = rslt[2];
-      (*data).varps[k] = rslt[3];
-      gettimeofday (&tv, NULL);
-      now = tv.tv_sec + tv.tv_usec / 1e6;
-      if (now - print > PSTEP)
-	{
-	  print = now;
-	  progress = (100 * ((double) k)) / ((double) ((*cfg).nspec));
-	  printf ("\b\b\b\b\b\b%5.1f%%", progress);
-	  fflush (stdout);
-	}
+    // Calculate window
+    makewin(segment_length, window, &winsum, &winsum2, &nenbw);
 
-      /* If k is a multiple of Nsave then write data to backup file */
-      if(k % Nsave  == 0 && k != k_start){
-          file1 = fopen((*cfg).ofn, "a");
-          for(j=k-Nsave; j<k; j++){
-		fprintf(file1, "%e	", (*data).psd[j]);
-		fprintf(file1, "%e	", (*data).ps[j]);
-		fprintf(file1, "%d	", (*data).avg[j]);
-		fprintf(file1, "\n");
-          }
-          fclose(file1);
-      }
-      else if(k == (*cfg).nspec - 1){
-          file1 = fopen((*cfg).ofn, "a");
-          for(j=Nsave*(k/Nsave); j<(*cfg).nspec; j++){
-		fprintf(file1, "%e	", (*data).psd[j]);
-		fprintf(file1, "%e	", (*data).ps[j]);
-		fprintf(file1, "%d	", (*data).avg[j]);
-		fprintf(file1, "\n");
-          }
-          fclose(file1);
-      }
+    // Loop over segments
+    hsize_t count[1] = {segment_length};
+    for (int i_segment = 0; i_segment < n_segments; i_segment++) {
+        // Read segment
+        hsize_t offset[1] = {i_segment * delta_segment};
+        read_from_dataset(contents, offset, count, strain_data_segment);
     }
-  /* finish */
-  close_hdf5_contents(contents);
-  printf ("\b\b\b\b\b\b  100%%\n");
-  fflush (stdout);
-  gettimeofday (&tv, NULL);
-  printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
+
+
+
+
+//  for (k = k_start; k < (*cfg).nspec; k++)
+//    {
+//      getDFT2((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
+//	      (*cfg).LR, &rslt[0], &(*data).avg[k], contents);
+//
+//      (*data).psd[k] = rslt[0];
+//      (*data).varpsd[k] = rslt[1];
+//      (*data).ps[k] = rslt[2];
+//      (*data).varps[k] = rslt[3];
+//      gettimeofday (&tv, NULL);
+//      now = tv.tv_sec + tv.tv_usec / 1e6;
+//      if (now - print > PSTEP)
+//	{
+//	  print = now;
+//	  progress = (100 * ((double) k)) / ((double) ((*cfg).nspec));
+//	  printf ("\b\b\b\b\b\b%5.1f%%", progress);
+//	  fflush (stdout);
+//	}
+//
+//      /* If k is a multiple of Nsave then write data to backup file */
+//      if(k % Nsave  == 0 && k != k_start){
+//          file1 = fopen((*cfg).ofn, "a");
+//          for(j=k-Nsave; j<k; j++){
+//		fprintf(file1, "%e	", (*data).psd[j]);
+//		fprintf(file1, "%e	", (*data).ps[j]);
+//		fprintf(file1, "%d	", (*data).avg[j]);
+//		fprintf(file1, "\n");
+//          }
+//          fclose(file1);
+//      }
+//      else if(k == (*cfg).nspec - 1){
+//          file1 = fopen((*cfg).ofn, "a");
+//          for(j=Nsave*(k/Nsave); j<(*cfg).nspec; j++){
+//		fprintf(file1, "%e	", (*data).psd[j]);
+//		fprintf(file1, "%e	", (*data).ps[j]);
+//		fprintf(file1, "%d	", (*data).avg[j]);
+//		fprintf(file1, "\n");
+//          }
+//          fclose(file1);
+//      }
+//    }
+//  /* finish */
+//  close_hdf5_contents(contents);
+//  printf ("\b\b\b\b\b\b  100%%\n");
+//  fflush (stdout);
+//  gettimeofday (&tv, NULL);
+//  printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 }
 
 
