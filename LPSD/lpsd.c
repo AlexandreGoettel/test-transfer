@@ -203,16 +203,10 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR, double *rslt,
 static void
 calc_params (tCFG * cfg, tDATA * data)
 {
-  double fres, f;
+  double fres, f, bin, g;
   int i, i0, ndft;
-  double bin;
-  double navg;
-  double ovfact, xov, g;
 
-  ovfact = 1. / (1. - (*cfg).ovlp / 100.);
-  xov = (1. - (*cfg).ovlp / 100.);
   g = log ((*cfg).fmax / (*cfg).fmin);
-
   i = (*cfg).nspec * (*cfg).iter;
   i0 = i;
   f = (*cfg).fmin * exp (i * g / ((*cfg).Jdes - 1.));
@@ -221,7 +215,6 @@ calc_params (tCFG * cfg, tDATA * data)
       fres = f * (exp (g / ((*cfg).Jdes - 1.)) - 1);
       ndft = round ((*cfg).fsamp / fres);
       bin = (f / fres);
-      navg = ((double) ((nread - ndft)) * ovfact) / ndft + 1;
       (*data).fspec[i - i0] = f;
       (*data).nffts[i - i0] = ndft;
       (*data).bins[i - i0] = bin;
@@ -323,6 +316,97 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
 }
 
 
+// @brief Use FFT approximation to calculate LPSD much faster, but at a certain cost of precision
+void
+calculate_fft_approx (tCFG * cfg, tDATA * data)
+{
+  int k;			/* 0..nspec */
+  int k_start = 0;		/* N. lines in save file. Post fail start point */
+  char ch;			/* For scanning through checkpointing file */
+  int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
+  int j; 			/* Iteration variables for checkpointing data */
+  FILE * file1;			/* Output file, temp for checkpointing */
+  double rslt[4];		/* rslt[0]=PSD, rslt[1]=variance(PSD) rslt[2]=PS rslt[3]=variance(PS) */
+  double progress;
+
+  struct timeval tv;
+  double start, now, print;
+
+  /* Check output file for saved checkpoint */
+  file1 = fopen((*cfg).ofn, "r");
+  if (file1){
+      while((ch=fgetc(file1)) != EOF){
+          if(ch == '\n'){
+              k_start++;
+          }
+      }
+  fclose(file1);
+  printf("Backup collected. Starting from k = %i\n", k_start);
+  }
+  else{
+      printf("No backup file. Starting from fmin\n");
+      k_start = 0;
+  }
+  printf ("Checkpointing every %i iterations\n", Nsave);
+  printf ("Computing output:  00.0%%");
+  fflush (stdout);
+  gettimeofday (&tv, NULL);
+  start = tv.tv_sec + tv.tv_usec / 1e6;
+  now = start;
+  print = start;
+
+  /* Start calculation of LPSD from saved checkpoint or zero */
+  struct hdf5_contents *contents = read_hdf5_file((*cfg).ifn, (*cfg).dataset_name);
+  for (k = k_start; k < (*cfg).nspec; k++)
+    {
+      getDFT2((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
+	      (*cfg).LR, &rslt[0], &(*data).avg[k], contents);
+
+      (*data).psd[k] = rslt[0];
+      (*data).varpsd[k] = rslt[1];
+      (*data).ps[k] = rslt[2];
+      (*data).varps[k] = rslt[3];
+      gettimeofday (&tv, NULL);
+      now = tv.tv_sec + tv.tv_usec / 1e6;
+      if (now - print > PSTEP)
+	{
+	  print = now;
+	  progress = (100 * ((double) k)) / ((double) ((*cfg).nspec));
+	  printf ("\b\b\b\b\b\b%5.1f%%", progress);
+	  fflush (stdout);
+	}
+
+      /* If k is a multiple of Nsave then write data to backup file */
+      if(k % Nsave  == 0 && k != k_start){
+          file1 = fopen((*cfg).ofn, "a");
+          for(j=k-Nsave; j<k; j++){
+		fprintf(file1, "%e	", (*data).psd[j]);
+		fprintf(file1, "%e	", (*data).ps[j]);
+		fprintf(file1, "%d	", (*data).avg[j]);
+		fprintf(file1, "\n");
+          }
+          fclose(file1);
+      }
+      else if(k == (*cfg).nspec - 1){
+          file1 = fopen((*cfg).ofn, "a");
+          for(j=Nsave*(k/Nsave); j<(*cfg).nspec; j++){
+		fprintf(file1, "%e	", (*data).psd[j]);
+		fprintf(file1, "%e	", (*data).ps[j]);
+		fprintf(file1, "%d	", (*data).avg[j]);
+		fprintf(file1, "\n");
+          }
+          fclose(file1);
+      }
+    }
+  /* finish */
+  close_hdf5_contents(contents);
+  printf ("\b\b\b\b\b\b  100%%\n");
+  fflush (stdout);
+  gettimeofday (&tv, NULL);
+  printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
+}
+
+
 /*
 	works on cfg, data structures of the calling program
 */
@@ -331,14 +415,7 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
 {
   nread = floor (((*cfg).tmax - (*cfg).tmin) * (*cfg).fsamp + 1);
 
-  if ((*cfg).METHOD == 0)
-    {
-      calc_params (cfg, data);
-      calculate_lpsd (cfg, data);
-    }
-  else if ((*cfg).METHOD == 1)
-    {
-      // calculate_fftw (cfg, data);
-      gerror("Method 1 (fftw) is not implemented in this version.");
-    }
+  calc_params (cfg, data);
+  if ((*cfg).METHOD == 0) calculate_lpsd (cfg, data);
+  else if ((*cfg).METHOD == 1) calculate_fft_approx (cfg, data);
 }
