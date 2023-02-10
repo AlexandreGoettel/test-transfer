@@ -532,14 +532,20 @@ void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc,
 {
 	double ymin, ymax;
 	int k;
-	FILE * file1;
+//	FILE * file1;
 
 	/* Load values from tempory backup into their respective columns */
-	file1 = fopen((*cfg).ofn, "r");
-	for(k=0; k<(*cfg).nspec; k++){
-	    fscanf(file1, "%lf %lf %d", &(*data).psd[k], &(*data).ps[k], &(*data).avg[k]);
-	}
-	fclose(file1);
+//	printf("mhhhhh\n");
+//	file1 = fopen(cfg->ofn, "r");
+//	printf("mh\n");
+//	for(k = 0; k < cfg->nspec; k++){
+////	    fscanf(file1, "%lf %lf %d", &(*data).psd[k], &(*data).ps[k], &(*data).avg[k]);
+////        printf("\t%e, %e, %d\n", data->psd[k], data->ps[k], data->avg[k]);
+//	    fscanf(file1, "%lf %lf %d", &(data->psd[k]), &(data->ps[k]), &(data->avg[k]));
+//	}
+//	printf("mh\n");
+//	fclose(file1);
+//	printf("mh\n");
 	
 	/* write output file with colums specified in gt */
 	writeOutputFile(cfg, data, gt, wi, argc, argv);

@@ -82,6 +82,35 @@ static double *dwin;		/* pointer to window function for FFT */
  ********************************************************************************/
 
 
+// Get mean over N first values of int sequence
+double get_mean(int* values, int N) {
+    double _sum = 0;
+    register int i;
+    for (i = 0; i < N; i++) {
+        _sum += values[i];
+    }
+    return _sum / N;
+}
+
+
+// @brief recursive function to count set bits
+int countSetBits(int n)
+{
+    // base case
+    if (n == 0)
+        return 0;
+    else
+        // if last bit set add 1 else add 0
+        return (n & 1) + countSetBits(n >> 1);
+}
+
+
+bool isPowerOfTwo(int n)
+{
+    return countSetBits(n) == 1;
+}
+
+
 static void
 getDFT2 (int nfft, double bin, double fsamp, double ovlp, int LR, double *rslt,
          int *avg, struct hdf5_contents *contents)
@@ -306,15 +335,71 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
 }
 
 
-double get_mean(int* values, int N) {
-    double _sum = 0;
-    register int i;
-    for (i = 0; i < N; i++) {
-        _sum += values[i];
-    }
-    return _sum / N;
+double*
+stride_over_array(double *data, int N, int stride, int offset, double *output)
+{
+    for (int i = offset; i < N; i += stride) *(output++) = data[i];
 }
 
+// @brief Calculate FFT on data of length N
+// @brief This implementation puts everything in memory, serves as test
+// @brief Takes in real data
+// @param Custom bin number, necessary for logarithmic frequency spacing
+// TODO: implement Bergland's algorithm
+// TODO: sin/cos optimisation
+void
+FFT(double *data_real, double *data_imag, int N, double bin,
+    double *output_real, double *output_imag)
+{
+    if (N == 1) {
+        output_real[0] = data_real[0];
+        output_imag[0] = data_imag[0];
+        return;
+    }
+    int m = N / 2;
+
+    // Separate data in even and odd parts
+    double x_even_real[m], x_odd_real[m], x_even_imag[m], x_odd_imag[m];
+    stride_over_array(data_real, N, 2, 0, x_even_real);
+    stride_over_array(data_real, N, 2, 1, x_odd_real);
+    stride_over_array(data_imag, N, 2, 0, x_even_imag);
+    stride_over_array(data_imag, N, 2, 1, x_odd_imag);
+
+    // Calculate FFT over halved arrays
+    double X_even_real[m], X_even_imag[m], X_odd_real[m], X_odd_imag[m];
+    FFT(x_even_real, x_even_imag, m, bin, X_even_real, X_even_imag);
+    FFT(x_odd_real, x_odd_imag, m, bin, X_odd_real, X_odd_imag);
+
+    // Calculate exponential term to multiply to X_odd
+    double exp_factor = 2.0 * M_PI * bin / ((double) N);
+    for (int i = 0; i < m; i++) {
+        double y = cos(i*exp_factor);
+        double x = -sin(i*exp_factor);
+        double b = X_odd_real[i];
+        double a = X_odd_imag[i];
+        X_odd_real[i] = b*y - a*x;
+        X_odd_imag[i] = a*y + b*x;
+    }
+
+    // Calculate final answer
+    for (int i = 0; i < m; i++) {
+        output_real[i] = X_even_real[i] + X_odd_real[i];
+        output_imag[i] = X_even_imag[i] + X_odd_imag[i];
+        output_real[i+m] = X_even_real[i] - X_odd_real[i];
+        output_imag[i+m] = X_even_imag[i] - X_odd_imag[i];
+    }
+//    printf("test\n\t%d, %e, %e\n", m, output_imag[1], output_real[1]);
+//    printf("0:\t%d, %e, %e\n", m, X_odd_real[0], X_even_real[0]);
+//    printf("\t%d, %e, %e\n", m, X_odd_imag[0], X_even_imag[0]);
+//    printf("x:\t%d, %e, %e\n", m, x_odd_imag[0], x_even_imag[0]);
+//    printf("x:\t%d, %e, %e\n", m, x_odd_real[0], x_even_real[0]);
+//    printf("1:\t%d, %e, %e\n", m, X_odd_real[1], X_even_real[1]);
+//    printf("\t%d, %e, %e\n", m, X_odd_imag[1], X_even_imag[1]);
+//    printf("x:\t%d, %e, %e\n", m, x_odd_imag[1], x_even_imag[1]);
+//    printf("x:\t%d, %e, %e\n", m, x_odd_real[1], x_even_real[1]);
+}
+
+// @brief Same as FFT, but use fftw3 implementation instead, for speed.
 
 // @brief Use FFT approximation to calculate LPSD much faster, but at a certain cost of precision
 // @brief For now, just run over all frequency bins
@@ -331,7 +416,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     fflush (stdout);
     gettimeofday (&tv, NULL);
     double start = tv.tv_sec + tv.tv_usec / 1e6;
-    double now, print;
+    double now, print, progress;
     print = now = start;
 
     // Start LPSD calculation
@@ -346,71 +431,74 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     /* Adjust for edge case */
     int tmp = (n_segments - 1)*delta_segment + segment_length;
     if (tmp == nread) n_segments--;
+    // Comment: bin is constant in this version of the code, which is not entirely correct
+    // This will have to do for now
+    double bin = data->bins[0];
 
-    double *strain_data_segment = (double*) xmalloc(segment_length*sizeof(double));
-    double *window = (double*) xmalloc(2*segment_length*sizeof(double));
+    // Prepare zero-padding for FFT
+    int fft_length;
+    if (isPowerOfTwo(segment_length)) fft_length = segment_length;
+    else fft_length = pow(2, (int) log2(segment_length) + 1);
+
+    double *strain_data_segment = (double*) xmalloc(fft_length*sizeof(double));
+    double *window = (double*) xmalloc(2*fft_length*sizeof(double));
+    // Set remainder to zero
+    register int i;
+    for (i = segment_length; i < fft_length; i++) {
+        strain_data_segment[i] = 0;
+        window[2*i] = window[2*i+1] = 0;
+    }
 
     // Calculate window
     makewin(segment_length, window, &winsum, &winsum2, &nenbw);
 
     // Loop over segments
     hsize_t count[1] = {segment_length};
+    double total[cfg->nspec];
+    memset(total, 0, cfg->nspec*sizeof(double));
     for (int i_segment = 0; i_segment < n_segments; i_segment++) {
         // Read segment
         hsize_t offset[1] = {i_segment * delta_segment};
         read_from_dataset(contents, offset, count, strain_data_segment);
+
+        // FFT calculation
+        double zeros[fft_length];  // Imaginary part of data
+        memset(zeros, 0, fft_length*sizeof(double));
+        double output_real[fft_length], output_imag[fft_length];
+        FFT(strain_data_segment, zeros, fft_length, bin, output_real, output_imag);
+
+        // Save results
+        for (i = 0; i < cfg->nspec; i++) {
+            double _sum = output_real[i]*output_real[i] + output_imag[i]*output_imag[i];
+            total[i] += _sum;
+        }
+
+        // Track progress
+//        now = tv.tv_sec + tv.tv_usec / 1e6;
+//        print = now;
+//        progress = (100 * ((double) i_segment)) / ((double) n_segments);
+//        printf ("\b\b\b\b\b\b%5.1f%%", progress);
+//        fflush (stdout);
+    }
+    // Average over segments
+    for (i = 0; i < cfg->nspec; i++){
+        data->psd[i] = total[i] * 2. / (n_segments * cfg->fsamp * winsum2);
+        data->ps[i] = data->psd[i] * (cfg->fsamp * winsum2) / (winsum * winsum);
+        data->varpsd[i] = data->varps[i] = 0;
+        data->avg[i] = n_segments;
     }
 
 
+    /* finish */
+    fflush (stdout);
+    gettimeofday (&tv, NULL);
+    printf ("\b\b\b\b\b\b  100%%\n");
+    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 
-
-//  for (k = k_start; k < (*cfg).nspec; k++)
-//    {
-//      getDFT2((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
-//	      (*cfg).LR, &rslt[0], &(*data).avg[k], contents);
-//
-//      (*data).psd[k] = rslt[0];
-//      (*data).varpsd[k] = rslt[1];
-//      (*data).ps[k] = rslt[2];
-//      (*data).varps[k] = rslt[3];
-//      gettimeofday (&tv, NULL);
-//      now = tv.tv_sec + tv.tv_usec / 1e6;
-//      if (now - print > PSTEP)
-//	{
-//	  print = now;
-//	  progress = (100 * ((double) k)) / ((double) ((*cfg).nspec));
-//	  printf ("\b\b\b\b\b\b%5.1f%%", progress);
-//	  fflush (stdout);
-//	}
-//
-//      /* If k is a multiple of Nsave then write data to backup file */
-//      if(k % Nsave  == 0 && k != k_start){
-//          file1 = fopen((*cfg).ofn, "a");
-//          for(j=k-Nsave; j<k; j++){
-//		fprintf(file1, "%e	", (*data).psd[j]);
-//		fprintf(file1, "%e	", (*data).ps[j]);
-//		fprintf(file1, "%d	", (*data).avg[j]);
-//		fprintf(file1, "\n");
-//          }
-//          fclose(file1);
-//      }
-//      else if(k == (*cfg).nspec - 1){
-//          file1 = fopen((*cfg).ofn, "a");
-//          for(j=Nsave*(k/Nsave); j<(*cfg).nspec; j++){
-//		fprintf(file1, "%e	", (*data).psd[j]);
-//		fprintf(file1, "%e	", (*data).ps[j]);
-//		fprintf(file1, "%d	", (*data).avg[j]);
-//		fprintf(file1, "\n");
-//          }
-//          fclose(file1);
-//      }
-//    }
-//  /* finish */
-//  close_hdf5_contents(contents);
-//  printf ("\b\b\b\b\b\b  100%%\n");
-//  fflush (stdout);
-//  gettimeofday (&tv, NULL);
-//  printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
+    /* clean up */
+    close_hdf5_contents(contents);
+    xfree(window);
+    xfree(strain_data_segment);
 }
 
 
@@ -425,4 +513,5 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
   calc_params (cfg, data);
   if ((*cfg).METHOD == 0) calculate_lpsd (cfg, data);
   else if ((*cfg).METHOD == 1) calculate_fft_approx (cfg, data);
+  else gerror("Method not implemented.");
 }
