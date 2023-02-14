@@ -4,11 +4,11 @@
 void calculateSpectrum(tCFG *cfg, tDATA *data);
 void calculate_lpsd(tCFG*, tDATA*);
 static void calc_params(tCFG*, tDATA*);
-static void getDFT2(int, double, double, double, int,
+static void getDFT2(int, double, double, double,
                     double*, int*, struct hdf5_contents*);
 
 void calculate_fft_approx(tCFG*, tDATA*);
-void FFT(double*, double*, int, double, double*, double*);
+void FFT(double*, double*, int, double*, double*);
 
 #endif
 
@@ -25,3 +25,13 @@ void FFT(double*, double*, int, double, double*, double*);
 //    X = np.concatenate([X_even + X_odd,
 //                        X_even - X_odd])  # N sequence
 //    return X
+//
+//def DFT(x, k):
+//    output = np.zeros(k)
+//    N = len(x)
+//    n = np.arange(N)
+//    for ki in range(k):
+//        output[ki] = np.sum(x * np.exp(-np.pi*2j*n/N*ki))
+//    return output
+//
+//DFT(data, N/2) -> FFT(data, N)[::N/2]
