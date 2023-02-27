@@ -441,6 +441,16 @@ FFT(double *data_real, double *data_imag, int N,
 void
 calculate_fft_approx (tCFG * cfg, tDATA * data)
 {
+    // Track time and progress
+    struct timeval tv;
+    printf ("Computing output:  00.0%%");
+    fflush (stdout);
+    gettimeofday (&tv, NULL);
+    double start = tv.tv_sec + tv.tv_usec / 1e6;
+    double now, print, progress;
+    print = start;
+    now = start;
+
     // Define variables
     double epsilon = 0.1;  // TODO: pass arg
 
@@ -456,13 +466,11 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         // Get index of the end of the block - the frequency at which the approximation is valid up to epsilon
         j0 = j;
         int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
-        printf("Nj0: %d\n", Nj0);
-
         j = - (cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / (cfg->Jdes - 1.)) - 1.));
         if (j >= cfg->Jdes) break; // TODO: take care of edge case
 
         // Calculate window
-        double window[Nj0];
+        double *window = (double*) xmalloc(Nj0*sizeof(double));
         makewin(Nj0, window, &winsum, &winsum2, &nenbw);
 
         // Initialise data arrays
@@ -483,7 +491,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         double total[j - j0];
         memset(total, 0, (j-j0)*sizeof(double));
 
-        for (int i_segment = 0; i_segment < n_segments; i_segment++){
+        register int i_segment, ji;
+        for (i_segment = 0; i_segment < n_segments; i_segment++){
             // Take FFT of data x window
             hsize_t offset[1] = {i_segment*delta_segment};
             hsize_t count[1] = {Nj0};
@@ -491,7 +500,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             for (i = 0; i < Nj0; i++) data_real[i] *= window[i];
             FFT(data_real, data_imag, Nfft, fft_real, fft_imag);
             // Interpolate results
-            for (int ji = j0; ji < j; ji++) {
+            for (ji = j0; ji < j; ji++) {
                 int jfft = floor(Nfft * cfg->fmin/cfg->fsamp * exp(ji*g/(cfg->Jdes - 1.)));
                 double x = get_f_j(ji, cfg->fmin, cfg->fmax, cfg->Jdes);
                 double y1 = fft_real[jfft]*fft_real[jfft] + fft_imag[jfft]*fft_imag[jfft];
@@ -502,10 +511,15 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             }
         }
         // Normalise results and add to data->psd/data->ps
-        for (int ji = 0; ji < j - j0; ji++) {
+        for (ji = 0; ji < j - j0; ji++) {
             data->psd[ji+j0] = total[ji] * 2. / (n_segments * cfg->fsamp * winsum2);
             data->ps[ji+j0] = total[ji] * 2 / (n_segments * winsum*winsum);
         }
+
+        // Progress tracking
+        progress = 100. * (double) j / cfg->Jdes;
+        printf ("\b\b\b\b\b\b%5.1f%%", progress);
+        fflush (stdout);
 
         // Clean up
         xfree(data_real);
@@ -513,32 +527,14 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         xfree(fft_real);
         xfree(fft_imag);
     }
+    // Finish
+    gettimeofday (&tv, NULL);
+    printf ("\b\b\b\b\b\b  100%%\n");
+    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
+
     // Clean up
     close_hdf5_contents(contents);
 }
-//    // User output
-//    struct timeval tv;
-//    int Nsave = (*cfg).nspec / 100;
-//    printf ("Checkpointing every %i iterations\n", Nsave);
-//    printf ("Computing output:  00.0%%");
-//    fflush (stdout);
-//    gettimeofday (&tv, NULL);
-//    double start = tv.tv_sec + tv.tv_usec / 1e6;
-//    double now, print, progress;
-//    print = now = start;
-//
-//        // Track progress
-////        now = tv.tv_sec + tv.tv_usec / 1e6;
-////        print = now;
-////        progress = (100 * ((double) i_segment)) / ((double) n_segments);
-////        printf ("\b\b\b\b\b\b%5.1f%%", progress);
-////        fflush (stdout);
-//    }
-//    /* finish */
-//    fflush (stdout);
-//    gettimeofday (&tv, NULL);
-//    printf ("\b\b\b\b\b\b  100%%\n");
-//    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 
 
 /*
