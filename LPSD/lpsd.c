@@ -96,14 +96,14 @@ get_mean (int* values, int N) {
 
 // @brief recursive function to count set bits
 int
-countSetBits (int n)
+count_set_bits (int n)
 {
     // base case
     if (n == 0)
         return 0;
     else
         // if last bit set add 1 else add 0
-        return (n & 1) + countSetBits(n >> 1);
+        return (n & 1) + count_set_bits(n >> 1);
 }
 
 
@@ -111,7 +111,7 @@ int
 get_next_power_of_two (int n)
 {
     int output = n;
-    if (!(countSetBits(n) == 1 || n == 0))
+    if (!(count_set_bits(n) == 1 || n == 0))
       output = (int) pow(2, (int) log2(n) + 1);
     return output;
 }
@@ -206,11 +206,12 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, double *rslt,
     int start = 0;
     register int _nsum = 0;
     hsize_t data_count[1] = {count};
+    hsize_t data_rank = 1;
     while (start + nfft < nread)
     {
       // Load data
       hsize_t data_offset[1] = {start + window_offset};
-      read_from_dataset(contents, data_offset, data_count, strain_data_segment);
+      read_from_dataset(contents, data_offset, data_count, data_rank, data_count, strain_data_segment);
 
       // Calculate DFT
       register int i;
@@ -457,21 +458,20 @@ FFT(double *data_real, double *data_imag, int N,
 // Perform an FFT while controlling how much gets in memory by manually calculating the
 // top layers of the pyramid over sums
 void
-FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
+FFT_control_memory(int Nj0, int Nfft, int Nmax,
+                   struct hdf5_contents *contents, struct hdf5_contents *_contents,
                    double *winsum, double *winsum2, double *nenbw)
 {
     // Determine manual recursion depth
     // Nfft and Nmax must be powers of two!!
     int n_depth = round(log2(Nfft) - log2(Nmax));  // use round() to avoid float precision trouble
-    assert(n_depth > 1);  // TODO
 
     // Get 2^n_depth data samples, then iteratively work down to n = 1
     int two_to_n_depth = pow(2, n_depth);
-    int Nj0_over_two_n_depth = Nj0 / two_to_n_depth;
+    int Nj0_over_two_n_depth = Nj0 / two_to_n_depth + 1;
     int ordered_coefficients[two_to_n_depth];
     fill_ordered_coefficients(n_depth, ordered_coefficients);
 
-    // TODO: xmalloc to be safe
     // Approx (5 * 16 * Nmax) bits in memory
     double *data_subset_real = (double*)xmalloc(Nmax*sizeof(double));
     double *data_subset_imag = (double*)xmalloc(Nmax*sizeof(double));
@@ -480,18 +480,14 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
     double *fft_output_imag = (double*)xmalloc(Nmax*sizeof(double));
     double *window_subset = (double*)xmalloc(Nj0_over_two_n_depth*sizeof(double));
 
-    // Open temporary hdf5 file to temporarily store information to disk in the loop
-    hsize_t rank = 2;  // real + imaginary
-    hsize_t dims[2] = {Nfft, Nfft};
-    struct hdf5_contents *_contents = open_hdf5_file("tmp.hdf5", "fft_contents", rank, dims);
-
     // Perform FFTs on bottom layer of pyramid and save results to temporary file
     for (int i = 0; i < two_to_n_depth; i++) {
         // Read data
         hsize_t count[1] = {Nj0_over_two_n_depth};
         hsize_t offset[1] = {ordered_coefficients[i]};
         hsize_t stride[1] = {two_to_n_depth};
-        read_from_dataset_stride(contents, offset, count, stride, data_subset_real);
+        hsize_t rank = 1;
+        read_from_dataset_stride(contents, offset, count, stride, rank, count, data_subset_real);
 
         // Zero-pad data
         for (int j = Nj0_over_two_n_depth; j < Nmax; j++) data_subset_real[j] = 0;
@@ -504,18 +500,17 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
         for (int j = 0; j < Nj0_over_two_n_depth; j++) data_subset_real[j] *= window_subset[j];
 
         // Take FFT
-        FFT(data_subset_real, data_subset_imag, Nfft, fft_output_real, fft_output_imag);
+        FFT(data_subset_real, data_subset_imag, Nmax, fft_output_real, fft_output_imag);
 
         // Save real part to file
-        hsize_t _offset[2] = {i*Nmax, i*Nmax};
-        hsize_t _count[2] = {Nmax, 0};
+        hsize_t _offset[2] = {0, i*Nmax};
+        hsize_t _count[2] = {1, Nmax};
         hsize_t _data_rank = 1;
         hsize_t _data_count[1] = {Nmax};
-        write_to_hdf5(_contents, data_subset_real, _offset, _count, _data_rank, _data_count);
+        write_to_hdf5(_contents, fft_output_real, _offset, _count, _data_rank, _data_count);
         // Save imaginary part
-        count[0] = 0;
-        count[1] = Nmax;
-        write_to_hdf5(_contents, data_subset_imag, _offset, _count, _data_rank, _data_count);
+        _offset[0] = 1;
+        write_to_hdf5(_contents, fft_output_imag, _offset, _count, _data_rank, _data_count);
         // Note: if I saved real/imag in one 2D array instead of two arrays,
         // I would only need one call to write_to_hdf5 in this loop. Could save time?
     }
@@ -547,25 +542,25 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
             // Loop over memory units (of length Nmax)
             for (int j = 0; j < m; j++) {
                 // Load even terms
-                hsize_t offset[2] = {j*Nmax, j*Nmax};
-                hsize_t count[2] = {Nmax, 0};
-                read_from_dataset(_contents, offset, count, even_terms_real);
-                count[0] = 0;
-                count[1] = Nmax;
-                read_from_dataset(_contents, offset, count, even_terms_imag);
+                hsize_t offset[2] = {0, j*Nmax};
+                hsize_t count[2] = {1, Nmax};
+                hsize_t data_rank = 1;
+                hsize_t data_count[1] = {Nmax};
+                read_from_dataset(_contents, offset, count, data_rank, data_count, even_terms_real);
+                offset[0] = 1;
+                read_from_dataset(_contents, offset, count, data_rank, data_count, even_terms_imag);
 
                 // Load odd terms
-                offset[0] = offset[1] = (j+1)*Nmax;
-                read_from_dataset(_contents, offset, count, odd_terms_imag);
-                count[0] = Nmax;
-                count[1] = 0;
-                read_from_dataset(_contents, offset, count, odd_terms_real);
+                offset[1] = (j+1)*Nmax;
+                read_from_dataset(_contents, offset, count, data_rank, data_count, odd_terms_imag);
+                offset[0] = 0;
+                read_from_dataset(_contents, offset, count, data_rank, data_count, odd_terms_real);
 
                 // Piecewise (complex) multiply odd terms with exp term
                 double exp_factor = 2.0 * M_PI / ((double) Nfft / two_to_n_depth);
-                for (int k = j*Nmax; k < (j+1)*Nmax; k++) {
-                    double y = cos(k*exp_factor);
-                    double x = -sin(k*exp_factor);
+                for (int k = 0; k < Nmax; k++) {
+                    double y = cos((j*Nmax+k)*exp_factor);
+                    double x = -sin((j*Nmax+k)*exp_factor);
                     double a = odd_terms_imag[k];
                     double b = odd_terms_real[k];
                     odd_terms_real[k] = b*y - a*x;
@@ -573,38 +568,30 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
                 }
 
                 // Combine left side
-                for (int k = j*Nmax; k < (j+1)*Nmax; k++)
+                for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_real[k] + odd_terms_real[k];
-                hsize_t offset_left[2] = {j*Nmax, j*Nmax};
-                count[0] = Nmax;
-                count[1] = 0;
-                hsize_t data_rank = 1;
-                hsize_t data_count[1] = {Nmax};
+                hsize_t offset_left[2] = {0, j*Nmax};
                 write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
-                for (int k = j*Nmax; k < (j+1)*Nmax; k++)
+                for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_imag[k] + odd_terms_imag[k];
-                count[0] = 0;
-                count[1] = Nmax;
+                offset[0] = 1;
                 write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
 
                 // Combine right side
-                for (int k = j*Nmax; k < (j+1)*Nmax; k++)
+                for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_real[k] - odd_terms_real[k];
                 hsize_t offset_right[2] = {(int)Nfft/pow(2, n_depth+1)+j*Nmax, (int)Nfft/pow(2, n_depth+1)+j*Nmax};
-                count[0] = Nmax;
-                count[1] = 0;
+                offset[0] = 0;
                 write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
-                for (int k = j*Nmax; k < (j+1)*Nmax; k++)
+                for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_imag[k] - odd_terms_imag[k];
-                count[0] = 0;
-                count[1] = Nmax;
+                offset[0] = 1;
                 write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
             }
             // loop(read[j*M:(j+1)*M], combine[j*M:(j+1)*M], combine[(j+pow^(mem-1)*M:(j+(pow^mem-1)+1)*M];
         }
     }
     // Clean up
-    close_hdf5_contents(_contents);
     xfree(even_terms_real);
     xfree(even_terms_imag);
     xfree(odd_terms_real);
@@ -644,7 +631,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         j0 = j;
         int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
         j = - (cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / (cfg->Jdes - 1.)) - 1.));
-        printf("j, Jdes: %d, %d", j, cfg->Jdes);
+//        printf("j, Jdes: %d, %d\n", j, cfg->Jdes);
         if (j >= cfg->Jdes) break; // TODO: take care of edge case
 
         // Prepare segment loop
@@ -653,109 +640,68 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         /* Adjust for edge case */
         int tmp = (n_segments - 1)*delta_segment + Nj0;
         if (tmp == nread) n_segments--;
+        double total[j - j0];  // TODO: malloc?
+        memset(total, 0, (j-j0)*sizeof(double));
 
         // Prepare FFT
         int Nfft = get_next_power_of_two(Nj0);
-
-        // Loop over memory blocks
-//        int max_samples_in_memory = 33554432;  // 2^25 = 0.5 GB if double  // TODO: pass arg
+        // int max_samples_in_memory = 33554432;  // 2^25 b = 0.5 Gb if double  // TODO: pass arg
         int max_samples_in_memory = 131072;  // 2^17, for testing #deleteme
-        int remaining_samples = Nfft;
-        // Ore pre-processing area
-        FFT_control_memory(Nj0, Nfft, max_samples_in_memory, contents,
-                           &winsum, &winsum2, &nenbw);
-        return;
+        // Open temporary hdf5 file to temporarily store information to disk in the loop
+        hsize_t rank = 2;  // real + imaginary
+        hsize_t dims[2] = {2, Nfft};
+//        printf("Nj0, Nfft, Nmax: %d, %d, %d\n", Nj0, Nfft, max_samples_in_memory);
+        struct hdf5_contents *_contents = open_hdf5_file("tmp.h5", "fft_contents", rank, dims);
 
-//        while (remaining_samples > 0) {
-//
-//        }
-//        // Loop over segments
-//        // If it is not possible to efficiently generate the window on the fly
-//        // It it probably worth it to have an initial loop over data to multiply it to the window?
-//        // For now test with on-the-fly generation
-//        register int i_segment;
-//        for (i_segment = 0; i_segment < n_segments; i_segment++){
-//            FFT_in_parts(Nj0, Nfft, max_samples_in_memory, contents, &winsum, &winsum2, &nenbw);
-//        }
+        // Loop over segments
+        register int i_segment, ji;
+        for (i_segment = 0; i_segment < n_segments; i_segment++){
+            // Take FFT of data * window
+            // winsum and winsum2 are calculated in here
+            if (Nfft > max_samples_in_memory)
+                FFT_control_memory(Nj0, Nfft, max_samples_in_memory, contents, _contents,
+                                   &winsum, &winsum2, &nenbw);
+            else
+                // TODO: Don't use save to file when Nfft <= max_samples_in_memory!
+
+            // Load results that are between j0 and j
+            int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));
+            int jfft_max = ceil(Nfft * cfg->fmin/cfg->fsamp * exp(j*g/(cfg->Jdes - 1.)));
+            double fft_real[jfft_max - jfft_min], fft_imag[jfft_max - jfft_min];  // TODO: malloc?
+            hsize_t count[2] = {1, jfft_max - jfft_min};
+            hsize_t offset[2] = {0, jfft_min};
+            hsize_t data_rank = 1;
+            hsize_t data_count[1] = {count[1]};
+            read_from_dataset(_contents, offset, count, data_rank, data_count, fft_real);
+            offset[0] = 1;
+            read_from_dataset(_contents, offset, count, data_rank, data_count, fft_imag);
+
+            // Interpolate results
+            for (ji = j0; ji < j; ji++) {
+                int jfft = floor(Nfft * cfg->fmin/cfg->fsamp * exp(ji*g/(cfg->Jdes - 1.)));
+                double x = get_f_j(ji, cfg->fmin, cfg->fmax, cfg->Jdes);
+                double y1 = fft_real[jfft-jfft_min]*fft_real[jfft-jfft_min] + fft_imag[jfft-jfft_min]*fft_imag[jfft-jfft_min];
+                double y2 = fft_real[jfft-jfft_min+1]*fft_real[jfft-jfft_min+1] + fft_imag[jfft-jfft_min+1]*fft_imag[jfft-jfft_min+1];
+                double x1 = cfg->fsamp / Nfft * jfft;
+                double x2 = cfg->fsamp / Nfft * (jfft+1);
+                total[ji - j0] += (y1*(x2 - x) - y2*(x1 - x)) / (x2 - x1);
+            }
+        }
+        // Normalise results and add to data->psd and data->ps
+        for (ji = 0; ji < j - j0; ji++) {
+            data->psd[ji+j0] = total[ji] * 2. / (n_segments * cfg->fsamp * winsum2);
+            data->ps[ji+j0] = total[ji] * 2 / (n_segments * winsum*winsum);
+        }
+
+        // Progress tracking
+        progress = 100. * (double) j / cfg->Jdes;
+        printf ("\b\b\b\b\b\b%5.1f%%", progress);
+        fflush (stdout);
+
+        // Clean-up
+        close_hdf5_contents(_contents);
     }
-
-//        // Loop over segments
-//        register int i_segment, ji;
-//        for (i_segment = 0; i_segment < n_segments; i_segment++){
-//            // Take FFT of data x window
-//            hsize_t offset[1] = {i_segment*delta_segment};
-//            hsize_t count[1] = {Nj0};
-//            read_from_dataset(contents, offset, count, data_real);
-//            for (i = 0; i < Nj0; i++) data_real[i] *= window[i];
-//            FFT(data_real, data_imag, Nfft, fft_real, fft_imag);
-//
-//            // Interpolate results
-//            for (ji = j0; ji < j; ji++) {
-//                int jfft = floor(Nfft * cfg->fmin/cfg->fsamp * exp(ji*g/(cfg->Jdes - 1.)));
-//                double x = get_f_j(ji, cfg->fmin, cfg->fmax, cfg->Jdes);
-//                double y1 = fft_real[jfft]*fft_real[jfft] + fft_imag[jfft]*fft_imag[jfft];
-//                double y2 = fft_real[jfft+1]*fft_real[jfft+1] + fft_imag[jfft+1]*fft_imag[jfft+1];
-//                double x1 = cfg->fsamp / Nfft * jfft;
-//                double x2 = cfg->fsamp / Nfft * (jfft+1);
-//                total[ji - j0] += (y1*(x2 - x) - y2*(x1 - x)) / (x2 - x1);
-//            }
-//        }
-//        // Normalise results and add to data->psd/data->ps
-//        for (ji = 0; ji < j - j0; ji++) {
-//            data->psd[ji+j0] = total[ji] * 2. / (n_segments * cfg->fsamp * winsum2);
-//            data->ps[ji+j0] = total[ji] * 2 / (n_segments * winsum*winsum);
-//        }
-//
-//        // Progress tracking
-//        progress = 100. * (double) j / cfg->Jdes;
-//        printf ("\b\b\b\b\b\b%5.1f%%", progress);
-//        fflush (stdout);
-//
-//        // Clean up
-//        xfree(data_real);
-//        xfree(data_imag);
-//        xfree(fft_real);
-//        xfree(fft_imag);
-//    }
-//    // Finish
-//    gettimeofday (&tv, NULL);
-//    printf ("\b\b\b\b\b\b  100%%\n");
-//    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
-//
-//    // Clean up
-//    close_hdf5_contents(contents);
 }
-
-//    while (true) {
-//        // Get index of the end of the block - the frequency at which the approximation is valid up to epsilon
-//        j0 = j;
-//        int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
-//        j = - (cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / (cfg->Jdes - 1.)) - 1.));
-//        if (j >= cfg->Jdes) break; // TODO: take care of edge case
-//
-//        // Calculate window
-//        double *window = (double*) xmalloc(Nj0*sizeof(double));
-//        makewin(Nj0, window, &winsum, &winsum2, &nenbw);
-//
-//        // Initialise data arrays
-//        int Nfft = get_next_power_of_two(Nj0);
-//        double *data_real = (double*) xmalloc(Nfft*sizeof(double));
-//        double *data_imag = (double*) xmalloc(Nfft*sizeof(double));
-//        double *fft_real = (double*) xmalloc(Nfft*sizeof(double));
-//        double *fft_imag = (double*) xmalloc(Nfft*sizeof(double));
-//        memset(data_imag, 0, Nfft*sizeof(double));
-//        for (i = Nj0; i < Nfft; i++) data_real[i] = 0;
-//
-//        // Prepare loop
-//        int delta_segment = floor(Nj0 * (1.0 - (double) (cfg->ovlp / 100.)));
-//        int n_segments = floor(1 + (nread - Nj0) / delta_segment);
-//        /* Adjust for edge case */
-//        int tmp = (n_segments - 1)*delta_segment + Nj0;
-//        if (tmp == nread) n_segments--;
-//        double total[j - j0];
-//        memset(total, 0, (j-j0)*sizeof(double));
-
-
 
 /*
 	works on cfg, data structures of the calling program
