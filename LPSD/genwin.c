@@ -658,14 +658,24 @@ makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
 }
 
 
-// @brief Similar to makewinsincos, but leave the exponential term calculation out
+// @brief Wrapper for makewin_indexed for standard window creation
 void
-makewin (int nfft, double *win, double *winsum,
-         double *winsum2, double *nenbw)
+makewin (int nfft, double *win,
+         double *winsum, double *winsum2, double *nenbw)
+{
+    makewin_indexed(nfft, 0, 1, win, winsum, winsum2, nenbw, true);
+}
+
+// @brief Similar to makewinsincos, but leave the exponential term calculation out
+// @brief It is not the responsibility of this function to make sure that the length of win is correct!
+void
+makewin_indexed (int nfft, int offset, int stride, double *win,
+                 double *winsum, double *winsum2, double *nenbw,
+                 bool reset_sums)
 {
   register int j;
   double z, winval;
-  *winsum = *winsum2 = 0;
+  if (reset_sums) *winsum = *winsum2 = 0;
 
   if (win_no == -2)
     gerror ("set_window has not been called.");
@@ -673,7 +683,7 @@ makewin (int nfft, double *win, double *winsum,
   {
     double kaiser_scal = netlibi0 (M_PI * win_alpha);
 
-    for (j = 0; j <= nfft; j++)
+    for (j = offset; j <= nfft; j += stride)
     {
       z = 2. * (double) j / (double) nfft - 1.;
       winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
@@ -683,7 +693,7 @@ makewin (int nfft, double *win, double *winsum,
       *(win++) = winval;
     }
   } else {
-    for (j = 0; j <= nfft; j++)
+    for (j = offset; j <= nfft; j += stride)
     {
       z = (double) j / (double) nfft;
 	  winval = (*(winlist[win_no].winfun)) (z);

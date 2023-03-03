@@ -10,11 +10,14 @@ void set_window (int type, double req_psll, char *name, double *psll,
 		 double *sbin);
 
 void makewinsincos (int nfft, double bin, double *win, double *winsum,
-		    double *winsum2, double *nenbw);
+		            double *winsum2, double *nenbw);
 void makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
-		    double *winsum2, double *nenbw, int, int, bool);
+		            double *winsum2, double *nenbw, int, int, bool);
 
 void makewin (int nfft, double *win, double *winsum,
               double *winsum2, double *nenbw);
+void makewin_indexed (int nfft, int offset, int stride, double *win,
+              double *winsum, double *winsum2, double *nenbw,
+              bool reset_sums);
 
 #endif

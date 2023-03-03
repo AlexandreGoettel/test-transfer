@@ -582,15 +582,71 @@ struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name)
     return (&contents);
 }
 
-// @brief Fill data_out with contents from the hdf5 dataset, according to offset/count
-// @param data_out should have the same dimensions as count
-// @param offset refers to the position in the dataset at which to start reading
+
+// @brief Open a new HDF5 file and create a dataspace/dataset inside (of type double)
+struct hdf5_contents* open_hdf5_file(char *filename, char *dataset_name,
+                                     hsize_t rank, hsize_t *dims) {
+    // Open file in truncation mode
+    hid_t file = H5Fopen(filename, H5F_ACC_TRUNC, H5P_DEFAULT);
+
+    // Create dataspace and dataset in file
+    hid_t dataspace = H5Screate_simple(rank, dims, NULL);
+    hid_t dataset = H5Dcreate(file, dataset_name, H5T_NATIVE_DOUBLE, dataspace,
+                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    static struct hdf5_contents _contents;
+    _contents.file = file;
+    _contents.dataspace = dataspace;
+    _contents.dataset = dataset;
+    _contents.rank = rank;
+    _contents.dims = dims;
+
+    return &_contents;
+}
+
+
+// @brief Write a data matrix to an existing HDF5 file with an existing dataspace
+// @param offset, count: specify where in the file dataspace to write the data
+struct hdf5_contents* write_to_hdf5(struct hdf5_contents *_contents, double *data,
+                                    hsize_t *offset, hsize_t *count,
+                                    hsize_t data_rank, hsize_t *data_count) {
+    // Select hyperslab in file dataspace
+    // Keep in mind: offset/count need as many dimensions as contents->rank
+    herr_t status = H5Sselect_hyperslab(_contents->dataspace, H5S_SELECT_SET,
+                                        offset, NULL, count, NULL);
+
+    // Create memory dataspace
+    hid_t memspace = H5Screate_simple(data_rank, data_count, NULL);
+
+    // Write data to dataset
+    status = H5Dwrite(_contents->dataset, H5T_NATIVE_DOUBLE,
+                      memspace, _contents->dataspace, H5P_DEFAULT, data);
+
+    // Clean-up
+    H5Sclose(memspace);
+    status = H5Sselect_none(_contents->dataspace);
+}
+
+// Wrapper for read_from_dataset_stride with no stride
 void read_from_dataset(struct hdf5_contents *contents, hsize_t *offset,
                        hsize_t *count, double *data_out)
 {
+    hsize_t stride[1] = {1};
+    read_from_dataset_stride(contents, offset, count, stride, data_out);
+}
+
+
+// @brief Fill data_out with contents from the hdf5 dataset, according to offset/count
+// @param data_out: should have the same dimensions as count
+// @param count: size of dataset to read
+// @param offset: position in the dataset at which to start reading
+// @param stride: stride parameter when creating hyperslab
+void read_from_dataset_stride(struct hdf5_contents *contents, hsize_t *offset,
+                              hsize_t *count, hsize_t *stride, double *data_out)
+{
     // Use hyperslab to read partial file contents out
     herr_t status;
-    status = H5Sselect_hyperslab(contents->dataspace, H5S_SELECT_SET, offset, NULL,
+    status = H5Sselect_hyperslab(contents->dataspace, H5S_SELECT_SET, offset, stride,
                                  count, NULL);
     hid_t memspace = H5Screate_simple(contents->rank, count, NULL);
 
@@ -602,6 +658,7 @@ void read_from_dataset(struct hdf5_contents *contents, hsize_t *offset,
 
 void close_hdf5_contents(struct hdf5_contents *contents)
 {
+    // TODO: add if statements (only needed if close_hdf5_contents may be called in different circumstances)
     H5Dclose(contents->dataset);
     H5Sclose(contents->dataspace);
     H5Fclose(contents->file);
