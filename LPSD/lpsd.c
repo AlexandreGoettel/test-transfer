@@ -625,13 +625,11 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     register int i;
     int j, j0;
     j = j0 = 0;
-
     while (true) {
         // Get index of the end of the block - the frequency at which the approximation is valid up to epsilon
         j0 = j;
         int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
         j = - (cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / (cfg->Jdes - 1.)) - 1.));
-//        printf("j, Jdes: %d, %d\n", j, cfg->Jdes);
         if (j >= cfg->Jdes) break; // TODO: take care of edge case
 
         // Prepare segment loop
@@ -640,48 +638,80 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         /* Adjust for edge case */
         int tmp = (n_segments - 1)*delta_segment + Nj0;
         if (tmp == nread) n_segments--;
-        double total[j - j0];  // TODO: malloc?
-        memset(total, 0, (j-j0)*sizeof(double));
+        double *total = (double*) xmalloc((j - j0)*sizeof(double));
+        memset(total, 0, (j - j0)*sizeof(double));
 
         // Prepare FFT
-        int Nfft = get_next_power_of_two(Nj0);
         // int max_samples_in_memory = 33554432;  // 2^25 b = 0.5 Gb if double  // TODO: pass arg
         int max_samples_in_memory = 131072;  // 2^17, for testing #deleteme
-        // Open temporary hdf5 file to temporarily store information to disk in the loop
-        hsize_t rank = 2;  // real + imaginary
-        hsize_t dims[2] = {2, Nfft};
-//        printf("Nj0, Nfft, Nmax: %d, %d, %d\n", Nj0, Nfft, max_samples_in_memory);
-        struct hdf5_contents *_contents = open_hdf5_file("tmp.h5", "fft_contents", rank, dims);
+        int Nfft = get_next_power_of_two(Nj0);
+        // Relevant frequency range in full fft space
+        int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));
+        int jfft_max = ceil(Nfft * cfg->fmin/cfg->fsamp * exp(j*g/(cfg->Jdes - 1.)));
+
+        double *data_real, *data_imag, *fft_real, *fft_imag, *window;
+        data_real = data_imag = fft_real = fft_imag = window = NULL;
+        struct hdf5_contents *_contents = NULL;
+        if (Nfft <= max_samples_in_memory) {
+            // Run normal FFT
+            // Initialiase data/window arrays
+            data_real = (double*) xmalloc(Nfft*sizeof(double));
+            data_imag = (double*) xmalloc(Nfft*sizeof(double));
+            fft_real = (double*) xmalloc(Nfft*sizeof(double));
+            fft_imag = (double*) xmalloc(Nfft*sizeof(double));
+            memset(data_imag, 0, Nfft*sizeof(double));
+            for (i = Nj0; i < Nfft; i++) data_real[i] = 0;
+
+            // Calculate window
+            window = (double*) xmalloc(Nj0*sizeof(double));
+            makewin(Nj0, window, &winsum, &winsum2, &nenbw);
+        } else {
+            // Run memory-controlled FFT
+            // Open temporary hdf5 file to temporarily store information to disk in the loop
+            hsize_t rank = 2;  // real + imaginary
+            hsize_t dims[2] = {2, Nfft};
+            _contents = open_hdf5_file("tmp.h5", "fft_contents", rank, dims);
+            // Initialise fft output, but only in relevant frequency range
+            fft_real = (double*) xmalloc((jfft_max - jfft_min)*sizeof(double));
+            fft_imag = (double*) xmalloc((jfft_max - jfft_min)*sizeof(double));
+        }
 
         // Loop over segments
         register int i_segment, ji;
-        for (i_segment = 0; i_segment < n_segments; i_segment++){
-            // Take FFT of data * window
-            // winsum and winsum2 are calculated in here
-            if (Nfft > max_samples_in_memory)
+        for (i_segment = 0; i_segment < n_segments; i_segment++) {
+            int index_shift = 0;
+
+            if (Nfft <= max_samples_in_memory) {
+                // Run normal FFT
+                hsize_t offset[1] = {i_segment*delta_segment};
+                hsize_t count[1] = {Nj0};
+                hsize_t data_rank = 1;
+                hsize_t data_count[1] = {count[0]};
+                read_from_dataset(contents, offset, count, data_rank, data_count, data_real);
+                for (i = 0; i < Nj0; i++) data_real[i] *= window[i];
+                FFT(data_real, data_imag, Nfft, fft_real, fft_imag);
+            } else {
+                // Run memory-controlled FFT
+                // winsum and winsum2 are calculated in here
+                // TODO: window is calculated once per segment, should replace with dataset
                 FFT_control_memory(Nj0, Nfft, max_samples_in_memory, contents, _contents,
                                    &winsum, &winsum2, &nenbw);
-            else
-                // TODO: Don't use save to file when Nfft <= max_samples_in_memory!
-
-            // Load results that are between j0 and j
-            int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));
-            int jfft_max = ceil(Nfft * cfg->fmin/cfg->fsamp * exp(j*g/(cfg->Jdes - 1.)));
-            double fft_real[jfft_max - jfft_min], fft_imag[jfft_max - jfft_min];  // TODO: malloc?
-            hsize_t count[2] = {1, jfft_max - jfft_min};
-            hsize_t offset[2] = {0, jfft_min};
-            hsize_t data_rank = 1;
-            hsize_t data_count[1] = {count[1]};
-            read_from_dataset(_contents, offset, count, data_rank, data_count, fft_real);
-            offset[0] = 1;
-            read_from_dataset(_contents, offset, count, data_rank, data_count, fft_imag);
-
+                // Load frequency domain results between j0 and j
+                hsize_t count[2] = {1, jfft_max - jfft_min};
+                hsize_t offset[2] = {0, jfft_min};
+                hsize_t data_rank = 1;
+                hsize_t data_count[1] = {count[1]};
+                read_from_dataset(_contents, offset, count, data_rank, data_count, fft_real);
+                offset[0] = 1;
+                read_from_dataset(_contents, offset, count, data_rank, data_count, fft_imag);
+                index_shift = jfft_min;
+            }
             // Interpolate results
             for (ji = j0; ji < j; ji++) {
                 int jfft = floor(Nfft * cfg->fmin/cfg->fsamp * exp(ji*g/(cfg->Jdes - 1.)));
                 double x = get_f_j(ji, cfg->fmin, cfg->fmax, cfg->Jdes);
-                double y1 = fft_real[jfft-jfft_min]*fft_real[jfft-jfft_min] + fft_imag[jfft-jfft_min]*fft_imag[jfft-jfft_min];
-                double y2 = fft_real[jfft-jfft_min+1]*fft_real[jfft-jfft_min+1] + fft_imag[jfft-jfft_min+1]*fft_imag[jfft-jfft_min+1];
+                double y1 = fft_real[jfft-index_shift]*fft_real[jfft-index_shift] + fft_imag[jfft-index_shift]*fft_imag[jfft-index_shift];
+                double y2 = fft_real[jfft-index_shift+1]*fft_real[jfft-index_shift+1] + fft_imag[jfft-index_shift+1]*fft_imag[jfft-index_shift+1];
                 double x1 = cfg->fsamp / Nfft * jfft;
                 double x2 = cfg->fsamp / Nfft * (jfft+1);
                 total[ji - j0] += (y1*(x2 - x) - y2*(x1 - x)) / (x2 - x1);
@@ -699,8 +729,20 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         fflush (stdout);
 
         // Clean-up
-        close_hdf5_contents(_contents);
+        if (_contents) close_hdf5_contents(_contents);
+        xfree(total);
+        xfree(fft_real);
+        xfree(fft_imag);
+        if (data_real) xfree(data_real);
+        if (data_imag) xfree(data_imag);
+        if (window) xfree(window);
     }
+    /* finish */
+    close_hdf5_contents(contents);
+    printf ("\b\b\b\b\b\b  100%%\n");
+    fflush (stdout);
+    gettimeofday (&tv, NULL);
+    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 }
 
 /*

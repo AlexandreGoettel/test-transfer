@@ -653,21 +653,9 @@ void read_from_dataset_stride(struct hdf5_contents *contents, hsize_t *offset,
                               double *data_out)
 {
     // Use hyperslab to read partial file contents out
-    herr_t status;
-    status = H5Sselect_hyperslab(contents->dataspace, H5S_SELECT_SET, offset, stride,
-                                 count, NULL);
+    herr_t status = H5Sselect_hyperslab(contents->dataspace, H5S_SELECT_SET,
+                                        offset, stride, count, NULL);
     hid_t memspace = H5Screate_simple(data_rank, data_count, NULL);
-
-    // TMP: Get dims from dataspace
-//    hsize_t rank = H5Sget_simple_extent_ndims(contents->dataspace);
-//    hsize_t dims[rank];
-//    status = H5Sget_simple_extent_dims(contents->dataspace, dims, NULL);
-//    printf("TEST: rank: %d\n", (int)rank);
-//    for (int i = 0; i < (int) rank; i++) {
-//        printf("\td[%d] = %d\n", i, (int)dims[i]);
-//        printf("\toffset[%d] = %d\n", i, (int)offset[i]);
-//        printf("\tcount[%d] = %d\n", i, (int)count[i]);
-//    }
 
     status = H5Dread(contents->dataset, H5T_NATIVE_DOUBLE, memspace, contents->dataspace,
 		             H5P_DEFAULT, data_out);

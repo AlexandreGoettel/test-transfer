@@ -683,7 +683,7 @@ makewin_indexed (int nfft, int offset, int stride, double *win,
   {
     double kaiser_scal = netlibi0 (M_PI * win_alpha);
 
-    for (j = offset; j <= nfft; j += stride)
+    for (j = offset; j < nfft; j += stride)  // TODO: nfft+offset?
     {
       z = 2. * (double) j / (double) nfft - 1.;
       winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
@@ -693,7 +693,7 @@ makewin_indexed (int nfft, int offset, int stride, double *win,
       *(win++) = winval;
     }
   } else {
-    for (j = offset; j <= nfft; j += stride)
+    for (j = offset; j < nfft; j += stride)
     {
       z = (double) j / (double) nfft;
 	  winval = (*(winlist[win_no].winfun)) (z);
