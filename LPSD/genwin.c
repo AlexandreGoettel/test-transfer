@@ -663,18 +663,19 @@ void
 makewin (int nfft, double *win,
          double *winsum, double *winsum2, double *nenbw)
 {
-    makewin_indexed(nfft, 0, 1, win, winsum, winsum2, nenbw, true);
+    makewin_indexed(nfft, 0, nfft, win, winsum, winsum2, nenbw, true);
 }
 
 // @brief Similar to makewinsincos, but leave the exponential term calculation out
 // @brief It is not the responsibility of this function to make sure that the length of win is correct!
 void
-makewin_indexed (int nfft, int offset, int stride, double *win,
+makewin_indexed (int nfft, int offset, int count, double *win,
                  double *winsum, double *winsum2, double *nenbw,
                  bool reset_sums)
 {
   register int j;
   double z, winval;
+  double factor = 2. / (double) nfft;  // Division here for speed gain in loop
   if (reset_sums) *winsum = *winsum2 = 0;
 
   if (win_no == -2)
@@ -682,10 +683,9 @@ makewin_indexed (int nfft, int offset, int stride, double *win,
   if (win_no == -1)  /* Kaiser */
   {
     double kaiser_scal = netlibi0 (M_PI * win_alpha);
-
-    for (j = offset; j < nfft; j += stride)  // TODO: nfft+offset?
+    for (j = offset; j < offset + count; j++)
     {
-      z = 2. * (double) j / (double) nfft - 1.;
+      z = (double) j * factor - 1.;
       winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
 
       *winsum += winval;
@@ -693,9 +693,9 @@ makewin_indexed (int nfft, int offset, int stride, double *win,
       *(win++) = winval;
     }
   } else {
-    for (j = offset; j < nfft; j += stride)
+    for (j = offset; j < offset + count; j++)
     {
-      z = (double) j / (double) nfft;
+      z = 0.5 * (double) j * factor;
 	  winval = (*(winlist[win_no].winfun)) (z);
 
 	  *winsum += winval;

@@ -17,7 +17,7 @@ static void getDFT2(int, double, double, double,
 
 void calculate_fft_approx(tCFG*, tDATA*);
 void FFT(double*, double*, int, double*, double*);
-void FFT_control_memory(int, int, int, struct hdf5_contents*, struct hdf5_contents*,
-                        double*, double*, double*);
+void FFT_control_memory(int, int, int, struct hdf5_contents*,
+                        struct hdf5_contents*, struct hdf5_contents*);
 
 #endif

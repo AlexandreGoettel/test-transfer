@@ -559,7 +559,8 @@ void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc,
 
 // @brief Read the contents of a metadata and return pointer to hdf5_contents struct.
 // @brief This include ids of file, dataset, dataspace, as well as rank/dims info.
-struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name)
+void read_hdf5_file(struct hdf5_contents *contents,
+                    char *filename, char *dataset_name)
 {
     // Open data
     hid_t file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -571,21 +572,19 @@ struct hdf5_contents* read_hdf5_file(char *filename, char *dataset_name)
     hsize_t dims[rank];
     herr_t status = H5Sget_simple_extent_dims(dataspace, dims, NULL);
 
-    // Return struct
-    static struct hdf5_contents contents;
-    contents.file = file;
-    contents.dataset = dataset;
-    contents.dataspace = dataspace;
-    contents.rank = rank;
-    contents.dims = dims;
-
-    return (&contents);
+    // Save info to struct
+    contents->file = file;
+    contents->dataset = dataset;
+    contents->dataspace = dataspace;
+    contents->rank = rank;
+    contents->dims = dims;
 }
 
 
 // @brief Open a new HDF5 file and create a dataspace/dataset inside (of type double)
-struct hdf5_contents* open_hdf5_file(char *filename, char *dataset_name,
-                                     hsize_t rank, hsize_t *dims) {
+void open_hdf5_file(struct hdf5_contents *contents,
+                    char *filename, char *dataset_name,
+                    hsize_t rank, hsize_t *dims) {
     // Create file in truncation mode
     hid_t file = H5Fcreate(filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
@@ -594,14 +593,12 @@ struct hdf5_contents* open_hdf5_file(char *filename, char *dataset_name,
     hid_t dataset = H5Dcreate(file, dataset_name, H5T_NATIVE_DOUBLE, dataspace,
                               H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-    static struct hdf5_contents _contents;
-    _contents.file = file;
-    _contents.dataspace = dataspace;
-    _contents.dataset = dataset;
-    _contents.rank = rank;
-    _contents.dims = dims;
-
-    return &_contents;
+    // Save info to struct
+    contents->file = file;
+    contents->dataset = dataset;
+    contents->dataspace = dataspace;
+    contents->rank = rank;
+    contents->dims = dims;
 }
 
 
@@ -617,7 +614,8 @@ void write_to_hdf5(struct hdf5_contents *_contents, double *data,
 
     // Create memory dataspace
     hid_t memspace = H5Screate_simple(data_rank, data_count, NULL);
-    hsize_t data_offset[1] = {0};
+    hsize_t data_offset[data_rank];
+    for (int i = 0; i < (int) data_rank; i++) data_offset[i] = 0;
     status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET,
                                  data_offset, NULL, data_count, NULL);
 

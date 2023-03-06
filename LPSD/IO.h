@@ -18,8 +18,8 @@ struct hdf5_contents {
     hsize_t rank;
     hsize_t *dims;
 };
-struct hdf5_contents* read_hdf5_file(char*, char*);
-struct hdf5_contents* open_hdf5_file(char*, char*, hsize_t, hsize_t*);
+void read_hdf5_file(struct hdf5_contents *contents, char*, char*);
+void open_hdf5_file(struct hdf5_contents *contents, char*, char*, hsize_t, hsize_t*);
 void write_to_hdf5(struct hdf5_contents*, double*, hsize_t*, hsize_t*, hsize_t, hsize_t*);
 void read_from_dataset(struct hdf5_contents*, hsize_t*, hsize_t*, hsize_t, hsize_t*, double*);
 void read_from_dataset_stride(struct hdf5_contents*, hsize_t*, hsize_t*, hsize_t*, hsize_t, hsize_t*, double*);

@@ -333,11 +333,12 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   print = start;
   
   /* Start calculation of LPSD from saved checkpoint or zero */
-  struct hdf5_contents *contents = read_hdf5_file((*cfg).ifn, (*cfg).dataset_name);
+  struct hdf5_contents contents;
+  read_hdf5_file(&contents, (*cfg).ifn, (*cfg).dataset_name);
   for (k = k_start; k < (*cfg).nspec; k++)
     {
       getDFT2((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
-	          &rslt[0], &(*data).avg[k], contents);
+	          &rslt[0], &(*data).avg[k], &contents);
 
       (*data).psd[k] = rslt[0];
       (*data).varpsd[k] = rslt[1];
@@ -376,7 +377,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
       }
     }
   /* finish */
-  close_hdf5_contents(contents);
+  close_hdf5_contents(&contents);
   printf ("\b\b\b\b\b\b  100%%\n");
   fflush (stdout);
   gettimeofday (&tv, NULL);
@@ -458,9 +459,8 @@ FFT(double *data_real, double *data_imag, int N,
 // Perform an FFT while controlling how much gets in memory by manually calculating the
 // top layers of the pyramid over sums
 void
-FFT_control_memory(int Nj0, int Nfft, int Nmax,
-                   struct hdf5_contents *contents, struct hdf5_contents *_contents,
-                   double *winsum, double *winsum2, double *nenbw)
+FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
+                   struct hdf5_contents *window_contents, struct hdf5_contents *_contents)
 {
     // Determine manual recursion depth
     // Nfft and Nmax must be powers of two!!
@@ -468,7 +468,7 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax,
 
     // Get 2^n_depth data samples, then iteratively work down to n = 1
     int two_to_n_depth = pow(2, n_depth);
-    int Nj0_over_two_n_depth = Nj0 / two_to_n_depth + 1;
+    int Nj0_over_two_n_depth = Nj0 / two_to_n_depth;  // +1
     int ordered_coefficients[two_to_n_depth];
     fill_ordered_coefficients(n_depth, ordered_coefficients);
 
@@ -478,26 +478,25 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax,
     memset(data_subset_imag, 0, Nmax*sizeof(double));
     double *fft_output_real = (double*)xmalloc(Nmax*sizeof(double));
     double *fft_output_imag = (double*)xmalloc(Nmax*sizeof(double));
-    double *window_subset = (double*)xmalloc(Nj0_over_two_n_depth*sizeof(double));
+    double *window_subset = (double*)xmalloc((Nj0_over_two_n_depth+1)*sizeof(double));
 
     // Perform FFTs on bottom layer of pyramid and save results to temporary file
     for (int i = 0; i < two_to_n_depth; i++) {
         // Read data
-        hsize_t count[1] = {Nj0_over_two_n_depth};
         hsize_t offset[1] = {ordered_coefficients[i]};
+        int Ndata = (int)offset[0] + Nj0_over_two_n_depth*two_to_n_depth + 1 < Nj0 ?
+            Nj0_over_two_n_depth + 1 : Nj0_over_two_n_depth;
+        hsize_t count[1] = {Ndata};
         hsize_t stride[1] = {two_to_n_depth};
         hsize_t rank = 1;
         read_from_dataset_stride(contents, offset, count, stride, rank, count, data_subset_real);
 
         // Zero-pad data
-        for (int j = Nj0_over_two_n_depth; j < Nmax; j++) data_subset_real[j] = 0;
+        for (int j = Ndata; j < Nmax; j++) data_subset_real[j] = 0;
 
-        // Generate window
-        makewin_indexed(Nj0, ordered_coefficients[i], two_to_n_depth, window_subset,
-                        winsum, winsum2, nenbw, i == 0);
-
-        // Piecewise multiply
-        for (int j = 0; j < Nj0_over_two_n_depth; j++) data_subset_real[j] *= window_subset[j];
+        // Read window & apply to data (piecewise multiply)
+        read_from_dataset_stride(window_contents, offset, count, stride, rank, count, window_subset);
+        for (int j = 0; j < Ndata; j++) data_subset_real[j] *= window_subset[j];
 
         // Take FFT
         FFT(data_subset_real, data_subset_imag, Nmax, fft_output_real, fft_output_imag);
@@ -514,7 +513,6 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax,
         // Note: if I saved real/imag in one 2D array instead of two arrays,
         // I would only need one call to write_to_hdf5 in this loop. Could save time?
     }
-    // winsums are correct here
     // Clean-up
     xfree(data_subset_real);
     xfree(data_subset_imag);
@@ -619,7 +617,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     double g = log(cfg->fmax / cfg->fmin);
 
     // Prepare data file
-    struct hdf5_contents *contents = read_hdf5_file((*cfg).ifn, (*cfg).dataset_name);
+    struct hdf5_contents contents;
+    read_hdf5_file(&contents, (*cfg).ifn, (*cfg).dataset_name);
 
     // Loop over blocks
     register int i;
@@ -651,7 +650,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 
         double *data_real, *data_imag, *fft_real, *fft_imag, *window;
         data_real = data_imag = fft_real = fft_imag = window = NULL;
-        struct hdf5_contents *_contents = NULL;
+        struct hdf5_contents _contents, window_contents;
+        struct hdf5_contents *_contents_ptr = NULL, *window_contents_ptr = NULL;
         if (Nfft <= max_samples_in_memory) {
             // Run normal FFT
             // Initialiase data/window arrays
@@ -670,10 +670,43 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             // Open temporary hdf5 file to temporarily store information to disk in the loop
             hsize_t rank = 2;  // real + imaginary
             hsize_t dims[2] = {2, Nfft};
-            _contents = open_hdf5_file("tmp.h5", "fft_contents", rank, dims);
+            _contents_ptr = &_contents;
+            open_hdf5_file(_contents_ptr, "tmp.h5", "fft_contents", rank, dims);
+
             // Initialise fft output, but only in relevant frequency range
             fft_real = (double*) xmalloc((jfft_max - jfft_min)*sizeof(double));
             fft_imag = (double*) xmalloc((jfft_max - jfft_min)*sizeof(double));
+
+            // Calculate window and put it in temporary file
+            hsize_t window_rank = 1;
+            hsize_t window_dims[1] = {Nj0};
+            window_contents_ptr = &window_contents;
+            open_hdf5_file(window_contents_ptr, "window.h5", "window", window_rank, window_dims);
+
+            // Loop over Nmax segments to calculate window
+            window = (double*) xmalloc(max_samples_in_memory*sizeof(double));
+            int remaining_samples = Nj0;
+            int memory_unit_index = 0;
+            int iteration_samples;
+            while (remaining_samples > 0) {
+                // Calculate window
+                if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
+                else iteration_samples = remaining_samples;
+                makewin_indexed(Nj0, memory_unit_index*max_samples_in_memory,
+                                iteration_samples, window,
+                                &winsum, &winsum2, &nenbw, memory_unit_index == 0);
+
+                // Save to file
+                hsize_t offset[1] = {memory_unit_index*max_samples_in_memory};
+                hsize_t count[1] = {iteration_samples};
+                write_to_hdf5(window_contents_ptr, window, offset, count, window_rank, count);
+
+                // Book-keeping
+                remaining_samples -= iteration_samples;
+                memory_unit_index++;
+            }
+            xfree(window);
+            window = NULL;
         }
 
         // Loop over segments
@@ -687,23 +720,21 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 hsize_t count[1] = {Nj0};
                 hsize_t data_rank = 1;
                 hsize_t data_count[1] = {count[0]};
-                read_from_dataset(contents, offset, count, data_rank, data_count, data_real);
+                read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
                 for (i = 0; i < Nj0; i++) data_real[i] *= window[i];
                 FFT(data_real, data_imag, Nfft, fft_real, fft_imag);
             } else {
                 // Run memory-controlled FFT
-                // winsum and winsum2 are calculated in here
-                // TODO: window is calculated once per segment, should replace with dataset
-                FFT_control_memory(Nj0, Nfft, max_samples_in_memory, contents, _contents,
-                                   &winsum, &winsum2, &nenbw);
+                FFT_control_memory(Nj0, Nfft, max_samples_in_memory,
+                                   &contents, &window_contents, &_contents);
                 // Load frequency domain results between j0 and j
                 hsize_t count[2] = {1, jfft_max - jfft_min};
                 hsize_t offset[2] = {0, jfft_min};
                 hsize_t data_rank = 1;
                 hsize_t data_count[1] = {count[1]};
-                read_from_dataset(_contents, offset, count, data_rank, data_count, fft_real);
+                read_from_dataset(&_contents, offset, count, data_rank, data_count, fft_real);
                 offset[0] = 1;
-                read_from_dataset(_contents, offset, count, data_rank, data_count, fft_imag);
+                read_from_dataset(&_contents, offset, count, data_rank, data_count, fft_imag);
                 index_shift = jfft_min;
             }
             // Interpolate results
@@ -729,7 +760,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         fflush (stdout);
 
         // Clean-up
-        if (_contents) close_hdf5_contents(_contents);
+        if (_contents_ptr) close_hdf5_contents(_contents_ptr);
+        if (window_contents_ptr) close_hdf5_contents(window_contents_ptr);
         xfree(total);
         xfree(fft_real);
         xfree(fft_imag);
@@ -738,7 +770,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         if (window) xfree(window);
     }
     /* finish */
-    close_hdf5_contents(contents);
+    close_hdf5_contents(&contents);
     printf ("\b\b\b\b\b\b  100%%\n");
     fflush (stdout);
     gettimeofday (&tv, NULL);
