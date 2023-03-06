@@ -473,18 +473,18 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
     fill_ordered_coefficients(n_depth, ordered_coefficients);
 
     // Approx (5 * 16 * Nmax) bits in memory
-    double *data_subset_real = (double*)xmalloc(Nmax*sizeof(double));
-    double *data_subset_imag = (double*)xmalloc(Nmax*sizeof(double));
+    double *data_subset_real = (double*)malloc(Nmax*sizeof(double));
+    double *data_subset_imag = (double*)malloc(Nmax*sizeof(double));
     memset(data_subset_imag, 0, Nmax*sizeof(double));
-    double *fft_output_real = (double*)xmalloc(Nmax*sizeof(double));
-    double *fft_output_imag = (double*)xmalloc(Nmax*sizeof(double));
-    double *window_subset = (double*)xmalloc((Nj0_over_two_n_depth+1)*sizeof(double));
+    double *fft_output_real = (double*)malloc(Nmax*sizeof(double));
+    double *fft_output_imag = (double*)malloc(Nmax*sizeof(double));
+    double *window_subset = (double*)malloc((Nj0_over_two_n_depth+1)*sizeof(double));
 
     // Perform FFTs on bottom layer of pyramid and save results to temporary file
     for (int i = 0; i < two_to_n_depth; i++) {
         // Read data
         hsize_t offset[1] = {ordered_coefficients[i] + segment_offset};
-        int Ndata = ordered_coefficients[i] + Nj0_over_two_n_depth*two_to_n_depth + 1 < Nj0 ?
+        int Ndata = ordered_coefficients[i] + Nj0_over_two_n_depth*two_to_n_depth < Nj0 ?
             Nj0_over_two_n_depth + 1 : Nj0_over_two_n_depth;
         hsize_t count[1] = {Ndata};
         hsize_t stride[1] = {two_to_n_depth};
@@ -515,33 +515,35 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
         // I would only need one call to write_to_hdf5 in this loop. Could save time?
     }
     // Clean-up
-    xfree(data_subset_real);
-    xfree(data_subset_imag);
-    xfree(window_subset);
-    xfree(fft_output_real);
-    xfree(fft_output_imag);
+    free(data_subset_real);
+    free(data_subset_imag);
+    free(window_subset);
+    free(fft_output_real);
+    free(fft_output_imag);
 
     // TODO: don't need to write the last iteration of the pyramid to file as I could work with it here directly, small speed-up
     // Put 5 * 16 * Nmax bits in memory
-    double *even_terms_real = (double*)xmalloc(Nmax*sizeof(double));
-    double *even_terms_imag = (double*)xmalloc(Nmax*sizeof(double));
-    double *odd_terms_real = (double*)xmalloc(Nmax*sizeof(double));
-    double *odd_terms_imag = (double*)xmalloc(Nmax*sizeof(double));
-    double *write_vector = (double*)xmalloc(Nmax*sizeof(double));
+    double *even_terms_real = (double*)malloc(Nmax*sizeof(double));
+    double *even_terms_imag = (double*)malloc(Nmax*sizeof(double));
+    double *odd_terms_real = (double*)malloc(Nmax*sizeof(double));
+    double *odd_terms_imag = (double*)malloc(Nmax*sizeof(double));
+    double *write_vector = (double*)malloc(Nmax*sizeof(double));
     // Now loop over the rest of the pyramid
     while (n_depth > 0) {
         // Iterate n_depth
         n_depth--;
         two_to_n_depth = pow(2, n_depth);
-        Nj0_over_two_n_depth = Nj0 / two_to_n_depth;
-        int m = pow(2, (int)round(log2(Nfft) - log2(Nmax) - n_depth - 1));  //round() to avoid float precision
+        Nj0_over_two_n_depth = floor(Nj0 / two_to_n_depth);
+	int Nfft_over_two_n_depth = round(Nfft / two_to_n_depth);
+	// Number of memory units in lower-level pyramid segment
+	int n_mem_units = pow(2, (int)round(log2(Nfft) - log2(Nmax) - n_depth - 1));
 
-        // Loop over data
-        for (int i = 0; i < two_to_n_depth; i++) {
-            // Loop over memory units (of length Nmax)
-            for (int j = 0; j < m; j++) {
+	// Loop over segments at this pyramid level
+	for (int i_pyramid = 0; i_pyramid < two_to_n_depth; i_pyramid++) {
+            // Loop over memory units (of length Nmax) in one lower-level segment
+            for (int j = 0; j < n_mem_units; j++) {
                 // Load even terms
-                hsize_t offset[2] = {0, j*Nmax};
+                hsize_t offset[2] = {0, (j + 2*i_pyramid*n_mem_units)*Nmax};
                 hsize_t count[2] = {1, Nmax};
                 hsize_t data_rank = 1;
                 hsize_t data_count[1] = {Nmax};
@@ -550,13 +552,13 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
                 read_from_dataset(_contents, offset, count, data_rank, data_count, even_terms_imag);
 
                 // Load odd terms
-                offset[1] = (j+1)*Nmax;
+		offset[1] += n_mem_units*Nmax;
                 read_from_dataset(_contents, offset, count, data_rank, data_count, odd_terms_imag);
                 offset[0] = 0;
                 read_from_dataset(_contents, offset, count, data_rank, data_count, odd_terms_real);
 
                 // Piecewise (complex) multiply odd terms with exp term
-                double exp_factor = 2.0 * M_PI / ((double) Nfft / two_to_n_depth);
+                double exp_factor = 2.0 * M_PI / ((double) Nfft_over_two_n_depth);
                 for (int k = 0; k < Nmax; k++) {
                     double y = cos((j*Nmax+k)*exp_factor);
                     double x = -sin((j*Nmax+k)*exp_factor);
@@ -569,33 +571,31 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
                 // Combine left side
                 for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_real[k] + odd_terms_real[k];
-                hsize_t offset_left[2] = {0, j*Nmax};
-                write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
+		hsize_t offset_left[2] = {0, (j + 2*i_pyramid*n_mem_units)*Nmax};
+                write_to_hdf5(_contents, write_vector, offset_left, count, data_rank, data_count);
                 for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_imag[k] + odd_terms_imag[k];
-                offset[0] = 1;
-                write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
+                offset_left[0] = 1;
+                write_to_hdf5(_contents, write_vector, offset_left, count, data_rank, data_count);
 
                 // Combine right side
                 for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_real[k] - odd_terms_real[k];
-                hsize_t offset_right[2] = {(int)Nfft/pow(2, n_depth+1)+j*Nmax, (int)Nfft/pow(2, n_depth+1)+j*Nmax};
-                offset[0] = 0;
-                write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
+                hsize_t offset_right[2] = {0, (j + (2*i_pyramid + 1)*n_mem_units)*Nmax};
+                write_to_hdf5(_contents, write_vector, offset_right, count, data_rank, data_count);
                 for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_imag[k] - odd_terms_imag[k];
-                offset[0] = 1;
-                write_to_hdf5(_contents, write_vector, offset, count, data_rank, data_count);
-            }
-            // loop(read[j*M:(j+1)*M], combine[j*M:(j+1)*M], combine[(j+pow^(mem-1)*M:(j+(pow^mem-1)+1)*M];
+                offset_right[0] = 1;
+                write_to_hdf5(_contents, write_vector, offset_right, count, data_rank, data_count);
+	    }
         }
     }
     // Clean up
-    xfree(even_terms_real);
-    xfree(even_terms_imag);
-    xfree(odd_terms_real);
-    xfree(odd_terms_imag);
-    xfree(write_vector);
+    free(even_terms_real);
+    free(even_terms_imag);
+    free(odd_terms_real);
+    free(odd_terms_imag);
+    free(write_vector);
 }
 
 
