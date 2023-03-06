@@ -459,7 +459,7 @@ FFT(double *data_real, double *data_imag, int N,
 // Perform an FFT while controlling how much gets in memory by manually calculating the
 // top layers of the pyramid over sums
 void
-FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
+FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_contents *contents,
                    struct hdf5_contents *window_contents, struct hdf5_contents *_contents)
 {
     // Determine manual recursion depth
@@ -483,8 +483,8 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
     // Perform FFTs on bottom layer of pyramid and save results to temporary file
     for (int i = 0; i < two_to_n_depth; i++) {
         // Read data
-        hsize_t offset[1] = {ordered_coefficients[i]};
-        int Ndata = (int)offset[0] + Nj0_over_two_n_depth*two_to_n_depth + 1 < Nj0 ?
+        hsize_t offset[1] = {ordered_coefficients[i] + segment_offset};
+        int Ndata = ordered_coefficients[i] + Nj0_over_two_n_depth*two_to_n_depth + 1 < Nj0 ?
             Nj0_over_two_n_depth + 1 : Nj0_over_two_n_depth;
         hsize_t count[1] = {Ndata};
         hsize_t stride[1] = {two_to_n_depth};
@@ -495,7 +495,8 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, struct hdf5_contents *contents,
         for (int j = Ndata; j < Nmax; j++) data_subset_real[j] = 0;
 
         // Read window & apply to data (piecewise multiply)
-        read_from_dataset_stride(window_contents, offset, count, stride, rank, count, window_subset);
+        hsize_t window_offset[1] = {ordered_coefficients[i]};
+        read_from_dataset_stride(window_contents, window_offset, count, stride, rank, count, window_subset);
         for (int j = 0; j < Ndata; j++) data_subset_real[j] *= window_subset[j];
 
         // Take FFT
@@ -725,7 +726,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 FFT(data_real, data_imag, Nfft, fft_real, fft_imag);
             } else {
                 // Run memory-controlled FFT
-                FFT_control_memory(Nj0, Nfft, max_samples_in_memory,
+                FFT_control_memory(Nj0, Nfft, max_samples_in_memory, i_segment*delta_segment,
                                    &contents, &window_contents, &_contents);
                 // Load frequency domain results between j0 and j
                 hsize_t count[2] = {1, jfft_max - jfft_min};
