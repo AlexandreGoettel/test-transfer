@@ -534,12 +534,12 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
         n_depth--;
         two_to_n_depth = pow(2, n_depth);
         Nj0_over_two_n_depth = floor(Nj0 / two_to_n_depth);
-	int Nfft_over_two_n_depth = round(Nfft / two_to_n_depth);
-	// Number of memory units in lower-level pyramid segment
-	int n_mem_units = pow(2, (int)round(log2(Nfft) - log2(Nmax) - n_depth - 1));
+        int Nfft_over_two_n_depth = round(Nfft / two_to_n_depth);
+        // Number of memory units in lower-level pyramid segment
+        int n_mem_units = pow(2, (int)round(log2(Nfft) - log2(Nmax) - n_depth - 1));
 
-	// Loop over segments at this pyramid level
-	for (int i_pyramid = 0; i_pyramid < two_to_n_depth; i_pyramid++) {
+        // Loop over segments at this pyramid level
+        for (int i_pyramid = 0; i_pyramid < two_to_n_depth; i_pyramid++) {
             // Loop over memory units (of length Nmax) in one lower-level segment
             for (int j = 0; j < n_mem_units; j++) {
                 // Load even terms
@@ -552,7 +552,7 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
                 read_from_dataset(_contents, offset, count, data_rank, data_count, even_terms_imag);
 
                 // Load odd terms
-		offset[1] += n_mem_units*Nmax;
+		        offset[1] += n_mem_units*Nmax;
                 read_from_dataset(_contents, offset, count, data_rank, data_count, odd_terms_imag);
                 offset[0] = 0;
                 read_from_dataset(_contents, offset, count, data_rank, data_count, odd_terms_real);
@@ -571,7 +571,7 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
                 // Combine left side
                 for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_real[k] + odd_terms_real[k];
-		hsize_t offset_left[2] = {0, (j + 2*i_pyramid*n_mem_units)*Nmax};
+		        hsize_t offset_left[2] = {0, (j + 2*i_pyramid*n_mem_units)*Nmax};
                 write_to_hdf5(_contents, write_vector, offset_left, count, data_rank, data_count);
                 for (int k = 0; k < Nmax; k++)
                     write_vector[k] = even_terms_imag[k] + odd_terms_imag[k];
@@ -587,7 +587,7 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
                     write_vector[k] = even_terms_imag[k] - odd_terms_imag[k];
                 offset_right[0] = 1;
                 write_to_hdf5(_contents, write_vector, offset_right, count, data_rank, data_count);
-	    }
+	        }
         }
     }
     // Clean up
@@ -625,12 +625,13 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     register int i;
     int j, j0;
     j = j0 = 0;
-    while (true) {
+    while (j < cfg->Jdes - 1) {
         // Get index of the end of the block - the frequency at which the approximation is valid up to epsilon
+        // Block goes from index j0 to j
         j0 = j;
         int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
         j = - (cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / (cfg->Jdes - 1.)) - 1.));
-        if (j >= cfg->Jdes) break; // TODO: take care of edge case
+        if (j >= cfg->Jdes) j = cfg->Jdes - 1; // TODO: take care of edge case
 
         // Prepare segment loop
         int delta_segment = floor(Nj0 * (1.0 - (double) (cfg->ovlp / 100.)));
@@ -653,8 +654,9 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         data_real = data_imag = fft_real = fft_imag = window = NULL;
         struct hdf5_contents _contents, window_contents;
         struct hdf5_contents *_contents_ptr = NULL, *window_contents_ptr = NULL;
+        // This if/else statement allocates variables for the steps to come
         if (Nfft <= max_samples_in_memory) {
-            // Run normal FFT
+            // For normal FFT
             // Initialiase data/window arrays
             data_real = (double*) xmalloc(Nfft*sizeof(double));
             data_imag = (double*) xmalloc(Nfft*sizeof(double));
@@ -667,7 +669,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             window = (double*) xmalloc(Nj0*sizeof(double));
             makewin(Nj0, window, &winsum, &winsum2, &nenbw);
         } else {
-            // Run memory-controlled FFT
+            // For memory-controlled FFT
             // Open temporary hdf5 file to temporarily store information to disk in the loop
             hsize_t rank = 2;  // real + imaginary
             hsize_t dims[2] = {2, Nfft};
@@ -684,7 +686,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             window_contents_ptr = &window_contents;
             open_hdf5_file(window_contents_ptr, "window.h5", "window", window_rank, window_dims);
 
-            // Loop over Nmax segments to calculate window
+            // Loop over Nmax segments to calculate window without exceeding max memory
             window = (double*) xmalloc(max_samples_in_memory*sizeof(double));
             int remaining_samples = Nj0;
             int memory_unit_index = 0;
@@ -710,8 +712,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             window = NULL;
         }
 
-        // Loop over segments
         register int i_segment, ji;
+        // Loop over segments - this is the actual calculation step
         for (i_segment = 0; i_segment < n_segments; i_segment++) {
             int index_shift = 0;
 
@@ -738,7 +740,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 read_from_dataset(&_contents, offset, count, data_rank, data_count, fft_imag);
                 index_shift = jfft_min;
             }
-            // Interpolate results
+            // Interpolate results (linear)
             for (ji = j0; ji < j; ji++) {
                 int jfft = floor(Nfft * cfg->fmin/cfg->fsamp * exp(ji*g/(cfg->Jdes - 1.)));
                 double x = get_f_j(ji, cfg->fmin, cfg->fmax, cfg->Jdes);
@@ -750,9 +752,11 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             }
         }
         // Normalise results and add to data->psd and data->ps
+        double norm_psd = 2. / (n_segments * cfg->fsamp * winsum2);
+        double norm_ps = 2 / (n_segments * winsum*winsum);
         for (ji = 0; ji < j - j0; ji++) {
-            data->psd[ji+j0] = total[ji] * 2. / (n_segments * cfg->fsamp * winsum2);
-            data->ps[ji+j0] = total[ji] * 2 / (n_segments * winsum*winsum);
+            data->psd[ji+j0] = total[ji] * norm_psd;
+            data->ps[ji+j0] = total[ji] * norm_ps;
         }
 
         // Progress tracking
