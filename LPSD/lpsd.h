@@ -3,9 +3,9 @@
 
 double get_mean(int*, int);
 int count_set_bits(int);
-int get_next_power_of_two(int);
+long int get_next_power_of_two(long int);
 void stride_over_array(double*, int, int, int, double*);
-int get_N_j(int, double, double, double, int);  // TODO: replace with nffts
+long int get_N_j(int, double, double, double, int);  // TODO: replace with nffts
 double get_f_j(int, double, double, int);  // TODO: replace with fspec
 void fill_ordered_coefficients(int, int*);
 
@@ -17,7 +17,7 @@ static void getDFT2(int, double, double, double,
 
 void calculate_fft_approx(tCFG*, tDATA*);
 void FFT(double*, double*, int, double*, double*);
-void FFT_control_memory(int, int, int, int, struct hdf5_contents*,
+void FFT_control_memory(long int, long int, int, int, struct hdf5_contents*,
                         struct hdf5_contents*, struct hdf5_contents*);
 
 #endif

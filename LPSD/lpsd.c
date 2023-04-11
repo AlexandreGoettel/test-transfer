@@ -107,12 +107,12 @@ count_set_bits (int n)
 }
 
 
-int
-get_next_power_of_two (int n)
+long int
+get_next_power_of_two (long int n)
 {
-    int output = n;
+    long int output = n;
     if (!(count_set_bits(n) == 1 || n == 0))
-      output = (int) pow(2, (int) log2(n) + 1);
+      output = (long int) pow(2, (long int) log2(n) + 1);
     return output;
 }
 
@@ -127,7 +127,7 @@ stride_over_array (double *data, int N, int stride, int offset, double *output)
 // Get the segment length as a function of the frequency bin j
 // Rounded to nearest integer.
 // TODO: replace with call to nffts?
-int
+long int
 get_N_j (int j, double fsamp, double fmin, double fmax, int Jdes) {
     double g = log(fmax) - log(fmin);  // TODO: could consider making g part of cfg
     return round (fsamp/fmin * exp(-j*g / (Jdes - 1.)) / (exp(g / (Jdes - 1.)) - 1.));
@@ -459,7 +459,7 @@ FFT(double *data_real, double *data_imag, int N,
 // Perform an FFT while controlling how much gets in memory by manually calculating the
 // top layers of the pyramid over sums
 void
-FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_contents *contents,
+FFT_control_memory(long int Nj0, long int Nfft, int Nmax, int segment_offset, struct hdf5_contents *contents,
                    struct hdf5_contents *window_contents, struct hdf5_contents *_contents)
 {
     // Determine manual recursion depth
@@ -468,7 +468,7 @@ FFT_control_memory(int Nj0, int Nfft, int Nmax, int segment_offset, struct hdf5_
 
     // Get 2^n_depth data samples, then iteratively work down to n = 1
     int two_to_n_depth = pow(2, n_depth);
-    int Nj0_over_two_n_depth = Nj0 / two_to_n_depth;  // +1
+    long int Nj0_over_two_n_depth = Nj0 / two_to_n_depth;  // +1
     int ordered_coefficients[two_to_n_depth];
     fill_ordered_coefficients(n_depth, ordered_coefficients);
 
@@ -629,7 +629,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         // Get index of the end of the block - the frequency at which the approximation is valid up to epsilon
         // Block goes from index j0 to j
         j0 = j;
-        int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
+        long int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
         j = - (cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / (cfg->Jdes - 1.)) - 1.));
         if (j >= cfg->Jdes) j = cfg->Jdes - 1; // TODO: take care of edge case
 
@@ -643,9 +643,10 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         memset(total, 0, (j - j0)*sizeof(double));
 
         // Prepare FFT
-        // int max_samples_in_memory = 33554432;  // 2^25 b = 0.5 Gb if double  // TODO: pass arg
-        int max_samples_in_memory = 131072;  // 2^17, for testing #deleteme
-        int Nfft = get_next_power_of_two(Nj0);
+	// Whatever the value of max is, make it less than 2^31 or ints will break
+        int max_samples_in_memory = 33554432;  // 2^25 b = 0.5 Gb if double  // TODO: pass arg
+        // int max_samples_in_memory = 131072;  // 2^17, for testing #deleteme
+        long int Nfft = get_next_power_of_two(Nj0);
         // Relevant frequency range in full fft space
         int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));
         int jfft_max = ceil(Nfft * cfg->fmin/cfg->fsamp * exp(j*g/(cfg->Jdes - 1.)));
@@ -688,7 +689,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 
             // Loop over Nmax segments to calculate window without exceeding max memory
             window = (double*) xmalloc(max_samples_in_memory*sizeof(double));
-            int remaining_samples = Nj0;
+            long int remaining_samples = Nj0;
             int memory_unit_index = 0;
             int iteration_samples;
             while (remaining_samples > 0) {

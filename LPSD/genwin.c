@@ -597,7 +597,7 @@ set_window (int type, double req_psll, char *name, double *psll, double *rov,
 // @brief Wrapper for makewinsincos_indexed
 // @brief Calling this function will simply create the window for the entire segment
 void
-makewinsincos (int nfft, double bin, double *win, double *winsum,
+makewinsincos (long int nfft, double bin, double *win, double *winsum,
                double *winsum2, double *nenbw)
 {
     makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft, true);
@@ -608,7 +608,7 @@ makewinsincos (int nfft, double bin, double *win, double *winsum,
 // @brief Other parameters are from legacy code
 // @param reset_sums Set winsum,winsum2 back to zero before loop
 void
-makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
+makewinsincos_indexed (long int nfft, double bin, double *win, double *winsum,
 	       double *winsum2, double *nenbw, int start_index, int count,
 	       bool reset_sums)
 {
@@ -616,7 +616,7 @@ makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
   double z;
   double winval;
   double fact, arg;
-  register int j;
+  register long int j;
 
   if (reset_sums) *winsum = *winsum2 = 0;
 
@@ -660,7 +660,7 @@ makewinsincos_indexed (int nfft, double bin, double *win, double *winsum,
 
 // @brief Wrapper for makewin_indexed for standard window creation
 void
-makewin (int nfft, double *win,
+makewin (long int nfft, double *win,
          double *winsum, double *winsum2, double *nenbw)
 {
     makewin_indexed(nfft, 0, nfft, win, winsum, winsum2, nenbw, true);
@@ -669,11 +669,11 @@ makewin (int nfft, double *win,
 // @brief Similar to makewinsincos, but leave the exponential term calculation out
 // @brief It is not the responsibility of this function to make sure that the length of win is correct!
 void
-makewin_indexed (int nfft, int offset, int count, double *win,
+makewin_indexed (long int nfft, int offset, int count, double *win,
                  double *winsum, double *winsum2, double *nenbw,
                  bool reset_sums)
 {
-  register int j;
+  register long int j;
   double z, winval;
   double factor = 2. / (double) nfft;  // Division here for speed gain in loop
   if (reset_sums) *winsum = *winsum2 = 0;
