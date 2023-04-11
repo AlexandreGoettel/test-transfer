@@ -274,10 +274,6 @@ void memalloc(tCFG * cfg, tDATA * data)
 	(*data).bins = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
 	(*data).nffts = (int *) xmalloc(((*cfg).nspec) * sizeof(int));
 	(*data).avg = (int *) xmalloc(((*cfg).nspec) * sizeof(int));
-	if ((*cfg).METHOD == 1) {
-		(*data).fft_ps = (double *) xmalloc(((*cfg).nfft) * sizeof(double));
-		(*data).fft_varps = (double *) xmalloc(((*cfg).nfft) * sizeof(double));	
-	}
 }
 
 void memfree(tCFG *cfg, tDATA * data)
@@ -290,10 +286,6 @@ void memfree(tCFG *cfg, tDATA * data)
 	xfree((*data).bins);
 	xfree((*data).nffts);
 	xfree((*data).avg);
-	if ((*cfg).METHOD == 1) {
-		xfree((*data).fft_ps);
-		xfree((*data).fft_varps);
-	}
 }
 
 void checkParams() {

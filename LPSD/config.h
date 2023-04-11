@@ -131,8 +131,6 @@ typedef struct {
 	double *psd;			/* power spectral density */
 	double *varps;			/* variance of power spectrum */
 	double *varpsd;			/* variance of power spectral density */
-	double *fft_ps;			/* FFTW: complete power spectrum of FFTW */
-	double *fft_varps;		/* FFTW: complete variance of power spectrum of FFTW */
 	int *avg;			/* debug information: number of averages */
 	int *nffts;			/* list of nffts for DFTs */
 	int NoC;			/* number of columns in data file */
