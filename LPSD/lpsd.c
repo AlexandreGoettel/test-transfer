@@ -758,6 +758,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         for (ji = 0; ji < j - j0; ji++) {
             data->psd[ji+j0] = total[ji] * norm_psd;
             data->ps[ji+j0] = total[ji] * norm_ps;
+            data->avg[ji+j0] = n_segments;
         }
 
         // Progress tracking
