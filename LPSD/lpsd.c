@@ -82,6 +82,13 @@ static double *dwin;		/* pointer to window function for FFT */
  ********************************************************************************/
 
 
+// Interpolate between x12, y12 points to x
+double
+interpolate(double x, double x1, double x2, double y1, double y2) {
+	return (y1*(x2 - x) - y2*(x1 - x)) / (x2 - x1);	
+}
+
+
 // Get mean over N first values of int sequence
 double
 get_mean (int* values, int N) {
@@ -639,8 +646,14 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         /* Adjust for edge case */
         int tmp = (n_segments - 1)*delta_segment + Nj0;
         if (tmp == nread) n_segments--;
+
+	// Allocate arrays used to store the results in between
         double *total = (double*) xmalloc((j - j0)*sizeof(double));
+	double *total_real = (double*) xmalloc((j - j0)*sizeof(double));
+	double *total_imag = (double*) xmalloc((j - j0)*sizeof(double));
         memset(total, 0, (j - j0)*sizeof(double));
+	memset(total_real, 0, (j - j0)*sizeof(double));
+	memset(total_imag, 0, (j - j0)*sizeof(double));
 
         // Prepare FFT
 	// Whatever the value of max is, make it less than 2^31 or ints will break
@@ -745,20 +758,35 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             for (ji = j0; ji < j; ji++) {
                 int jfft = floor(Nfft * cfg->fmin/cfg->fsamp * exp(ji*g/(cfg->Jdes - 1.)));
                 double x = get_f_j(ji, cfg->fmin, cfg->fmax, cfg->Jdes);
-                double y1 = fft_real[jfft-index_shift]*fft_real[jfft-index_shift] + fft_imag[jfft-index_shift]*fft_imag[jfft-index_shift];
-                double y2 = fft_real[jfft-index_shift+1]*fft_real[jfft-index_shift+1] + fft_imag[jfft-index_shift+1]*fft_imag[jfft-index_shift+1];
                 double x1 = cfg->fsamp / Nfft * jfft;
                 double x2 = cfg->fsamp / Nfft * (jfft+1);
-                total[ji - j0] += (y1*(x2 - x) - y2*(x1 - x)) / (x2 - x1);
+
+                // Real part
+                double y1 = fft_real[jfft-index_shift];
+                double y2 = fft_real[jfft-index_shift+1];
+                total_real[ji - j0] += interpolate(x, x1, x2, y1, y2);
+
+                // Imaginary part
+                double z1 = fft_imag[jfft-index_shift];
+                double z2 = fft_imag[jfft-index_shift+1];
+                total_imag[ji - j0] += interpolate(x, x1, x2, z1, z2);
+
+                // PSD
+                double psd1 = y1*y1 + z1*z1;
+                double psd2 = y2*y2 + z2*z2;
+                total[ji - j0] += interpolate(x, x1, x2, psd1, psd2);
             }
         }
         // Normalise results and add to data->psd and data->ps
         double norm_psd = 2. / (n_segments * cfg->fsamp * winsum2);
+	double norm_lin = sqrt (norm_psd);
         double norm_ps = 2 / (n_segments * winsum*winsum);
         for (ji = 0; ji < j - j0; ji++) {
             data->psd[ji+j0] = total[ji] * norm_psd;
             data->ps[ji+j0] = total[ji] * norm_ps;
             data->avg[ji+j0] = n_segments;
+            data->psd_real[ji+j0] = total_real[ji] * norm_lin;
+            data->psd_imag[ji+j0] = total_imag[ji] * norm_lin;
         }
 
         // Progress tracking
@@ -770,6 +798,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         if (_contents_ptr) close_hdf5_contents(_contents_ptr);
         if (window_contents_ptr) close_hdf5_contents(window_contents_ptr);
         xfree(total);
+        xfree(total_real);
+        xfree(total_imag);
         xfree(fft_real);
         xfree(fft_imag);
         if (data_real) xfree(data_real);

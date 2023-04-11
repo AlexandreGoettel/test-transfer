@@ -272,6 +272,12 @@ static void writeHeaderLine(FILE *ofp, tGNUTERM * gt) {
 		case 'b':
 			fprintf(ofp, "Bin	");
 			break;
+		case 'r':
+			fprintf(ofp, "Re(PSD)   ");
+			break;
+		case 'i':
+			fprintf(ofp, "Im(PSD)   ");
+                        break;
 		default:
 			strcpy(&tmp[0],&((*gt).fmt[0]));
 			(*gt).fmt[c+1]=0;
@@ -334,6 +340,12 @@ static void writeData(FILE *ofp, tCFG * cfg, tDATA * data, tGNUTERM * gt) {
 				break;
 			case 'b':
 				fprintf(ofp, "%e	", (*data).bins[i]);
+				break;
+			case 'r':
+				fprintf(ofp, "%e        ", (*data).psd_real[i]);
+				break;
+			case 'i':
+				fprintf(ofp, "%e        ", (*data).psd_imag[i]);
 				break;
 			default:
 				break;

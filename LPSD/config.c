@@ -419,7 +419,7 @@ int readConfigFile() {
 	if (gti==0) {				/* no gnuplot terminal has been defined at all */
 		gti=1;
 		strcpy(gt[0].identifier,"standard gnuplot terminal");
-		strcpy(gt[0].fmt,"fDSN");
+		strcpy(gt[0].fmt,"fDSNri");
 		strcpy(gt[0].cmds,"");
 	}
 	return(ok);
