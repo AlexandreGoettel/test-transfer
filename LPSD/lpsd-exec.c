@@ -167,24 +167,13 @@ void getUserInput()
 	if (cfg.askfmax == 1)
 		askd("Max. frequency", &cfg.fmax);
 	if (cfg.METHOD == 0 || cfg.METHOD == 1) {	
-		if ((cfg.asknspec == 1) && (cfg.METHOD==0))
+		if (cfg.asknspec == 1)
 			aski("Number of samples in spectrum", &cfg.nspec);
 		if (cfg.askminAVG == 1)
 			aski("Minimum number of averages", &cfg.minAVG);	
 		if (cfg.askdesAVG == 1)
 			aski("Desired number of averages", &cfg.desAVG);
 	}
-	/* else if (cfg.METHOD == 1) {
-		if (cfg.fres < 0) {
-			cfg.nfft=round_downl(data.nread);
-			cfg.fres = cfg.fsamp / (double) cfg.nfft;
-		}    
-		if (cfg.askfres == 1)
-			askd("Frequency resolution", &cfg.fres);
-		cfg.nfft=round_downl(cfg.fsamp/cfg.fres);	// suitable nfft for FFTW
-		cfg.fres = cfg.fsamp / (double) cfg.nfft;	
-		cfg.nspec = cfg.fmax/cfg.fres+1-dMax(cfg.sbin,cfg.fmin/cfg.fres);
-	} */
 	if (cfg.askulsb == 1)
 		askd("Scaling factor", &cfg.ulsb);
 	if ((cfg.ngnuterm > 0) && (cfg.askgt==1)) {
@@ -227,30 +216,20 @@ void getDefaultValues()
 	data.nread = floor((cfg.tmax - cfg.tmin) * cfg.fsamp + 1);
 	set_window(cfg.WT, cfg.reqPSLL, &wi.name[0], &wi.psll, &rov,
 		   &wi.nenbw, &wi.w3db, &wi.flatness, &wi.sbin);
-	if ((cfg.cmdovlp==1) && (cfg.ovlp<0)) cfg.ovlp=rov;
-
-	if (cfg.sbin<0) {
+	if ((cfg.cmdovlp==1) && (cfg.ovlp<0))
+		cfg.ovlp=rov;
+	if (cfg.sbin<0)
 		cfg.sbin=wi.sbin;
-	}
 	if (cfg.fmin < 0) {
-	    xov = (1. - cfg.ovlp / 100.);
-	    cfg.fmin = cfg.sbin / (data.nread/cfg.fsamp) * (1 + xov * (cfg.minAVG - 1));
+		xov = (1. - cfg.ovlp / 100.);
+		cfg.fmin = cfg.sbin / (data.nread/cfg.fsamp) * (1 + xov * (cfg.minAVG - 1));
 	}
 	if (cfg.fres < 0) {
-		if (cfg.METHOD == 0) {
-			xov = (1. - cfg.ovlp / 100.);
-			cfg.fres = 1. / (cfg.tmax - cfg.tmin) * (1 + xov * (cfg.minAVG - 1));
-		} else if (cfg.METHOD == 1) {
-			cfg.nfft=round_downl(data.nread);
-			cfg.fres = cfg.fsamp / (double) cfg.nfft;
-		}
+		xov = (1. - cfg.ovlp / 100.);
+		cfg.fres = 1. / (cfg.tmax - cfg.tmin) * (1 + xov * (cfg.minAVG - 1));
 	}    
 	if (cfg.fmax < 0)
-	    cfg.fmax = cfg.fsamp / 2.0;
-	if (cfg.METHOD == 1) {
-		cfg.nfft = cfg.fsamp / cfg.fres;
-		cfg.nspec = cfg.fmax/cfg.fres+1-dMax(cfg.sbin,cfg.fmin/cfg.fres);
-	}
+		cfg.fmax = cfg.fsamp / 2.0;
 }
 
 /* for debugging */
@@ -307,10 +286,6 @@ void checkParams() {
 	}
 	if (cfg.METHOD==0) {
 		if (cfg.cmdfres) message("frequency resolution parameter is ignored in LPSD mode!");
-	}
-	if (cfg.METHOD==1) {
-		if (cfg.cmdminAVG) message("minimum averages parameter is ignored in FFT mode!");
-		if (cfg.cmddesAVG) message("desired averages parameter is ignored in FFT mode!");
 	}
 }
 

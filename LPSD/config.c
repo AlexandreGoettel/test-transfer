@@ -472,13 +472,8 @@ sprintf(&dest[strlen(dest)],"---Output------------------------------------------
 	sprintf(&dest[strlen(dest)],"Fmin (Hz): %.1e\t",cfg.fmin);
 	sprintf(&dest[strlen(dest)],"Fmax (Hz): %.1e\n",cfg.fmax);
 	sprintf(&dest[strlen(dest)],"SBIN (bins): %.2f\t",cfg.sbin);
-	if (cfg.METHOD==0) {
-		sprintf(&dest[strlen(dest)],"min. avgs: %d\t\t",cfg.minAVG);
-		sprintf(&dest[strlen(dest)],"des. avgs: %d\n",cfg.desAVG);
-	} else if (cfg.METHOD==1) {
-		sprintf(&dest[strlen(dest)],"avgs: %d\t\t",avg);
-		sprintf(&dest[strlen(dest)],"Fres (Hz): %.1e\n",cfg.fres);
-	}
+	sprintf(&dest[strlen(dest)],"min. avgs: %d\t\t",cfg.minAVG);
+	sprintf(&dest[strlen(dest)],"des. avgs: %d\n",cfg.desAVG);
 	sprintf(&dest[strlen(dest)],"Gnuplot terminal: %s\n",gt.identifier);
 	sprintf(&dest[strlen(dest)],"Method: %s\t\t",meth[cfg.METHOD]);
 	sprintf(&dest[strlen(dest)],"\n");

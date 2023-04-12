@@ -657,7 +657,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 
         // Prepare FFT
 	// Whatever the value of max is, make it less than 2^31 or ints will break
-        int max_samples_in_memory = 268435456;  // 2^28 b = 8 Gb if double  // TODO: pass arg
+	int max_samples_in_memory = 536870912;  // 2^29 b = 16 Gb if double  // TODO: pass arg
 	long int Nfft = get_next_power_of_two(Nj0);
         // Relevant frequency range in full fft space
         int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));
