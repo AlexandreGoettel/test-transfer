@@ -1494,6 +1494,16 @@ int round_down (int n) {
   	return *ip;
 }
 
+long int round_downl (long int n) {
+	long int *ip = goodn;
+
+	if (n < 2) return 2;
+        if (n >= goodn[ngoodn - 1]) return n;
+        while (*ip < n) ++ip;
+        if (*ip > n) --ip;
+        return *ip;
+}
+
 int round_close (int n, int nmax) {
 	int *ip = goodn, i1, i2;
 

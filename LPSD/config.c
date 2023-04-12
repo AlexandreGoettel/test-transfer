@@ -451,10 +451,10 @@ static void printData(char *dest, tCFG cfg, tDATA data) {
 sprintf(&dest[strlen(dest)],"---Data--------------------------------------------------------------------\n");
 	sprintf(&dest[strlen(dest)],"Regression: %s\t",yn[cfg.LR]);
 	sprintf(&dest[strlen(dest)],"Fsamp (Hz): %.2e\t",cfg.fsamp);
-	sprintf(&dest[strlen(dest)],"NDATA (samples): %d\n",data.ndata);
+	sprintf(&dest[strlen(dest)],"NDATA (samples): %ld\n",data.ndata);
 	sprintf(&dest[strlen(dest)],"Tmin (s): %.1f\t",cfg.tmin);
 	sprintf(&dest[strlen(dest)],"Tmax (s): %.1f\t",cfg.tmax);
-	sprintf(&dest[strlen(dest)],"Read (samples): %d\n",data.nread);
+	sprintf(&dest[strlen(dest)],"Read (samples): %ld\n",data.nread);
 	sprintf(&dest[strlen(dest)],"Mean: %.2e\t",data.mean);
 	sprintf(&dest[strlen(dest)],"Scaling factor: %.3e\t",cfg.ulsb);
 	sprintf(&dest[strlen(dest)],"Time column: %s\n",yn[cfg.time]);
@@ -468,7 +468,7 @@ static void printOutput(char *dest, tCFG cfg, tGNUTERM gt, tDATA data) {
 
 	avg=floor((data.nread-cfg.nfft)/(cfg.ovlp/100.)/cfg.nfft+1);
 sprintf(&dest[strlen(dest)],"---Output------------------------------------------------------------------\n");
-	sprintf(&dest[strlen(dest)],"Size: %d\t\t",cfg.nspec);
+	sprintf(&dest[strlen(dest)],"Size: %ld\t\t",cfg.nspec);
 	sprintf(&dest[strlen(dest)],"Fmin (Hz): %.1e\t",cfg.fmin);
 	sprintf(&dest[strlen(dest)],"Fmax (Hz): %.1e\n",cfg.fmax);
 	sprintf(&dest[strlen(dest)],"SBIN (bins): %.2f\t",cfg.sbin);

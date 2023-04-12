@@ -75,8 +75,8 @@ typedef struct {
 	int WT;				/* window function; -2 Kaiser, -1 flat top, 0..30 */
 	unsigned short int askWT;
 	int LR;				/* 0 no linear regression, 1 perform linear regression */
-	int nspec;			/* number of samples in spectrum */
-	int nfft;			/* FFTW: dimension of FFT */
+	long int nspec;			/* number of samples in spectrum */
+	long int nfft;			/* FFTW: dimension of FFT */
 	int iter;			/* A reference number to show why step through a parallelised job. Set to zero for a single job run */
 	int Jdes;			/* Provides the total number of required frequencies */
 	unsigned short int asknspec;
@@ -137,8 +137,8 @@ typedef struct {
 	int *nffts;			/* list of nffts for DFTs */
 	int NoC;			/* number of columns in data file */
 	double mean;			/* mean value of input data */
-	int ndata;			/* number of data in input file */
-	int nread;			/* length of time series used for spectrum estimation */
+	long int ndata;			/* number of data in input file */
+	long int nread;			/* length of time series used for spectrum estimation */
 	int comma;			/* 1 - comma as decimal delimiter; 0 - decimal points */
 
 } tDATA;

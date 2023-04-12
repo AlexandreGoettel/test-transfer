@@ -155,7 +155,7 @@ void getUserInput()
 	if (cfg.fres < 0) {
 		xov = (1. - cfg.ovlp / 100.);
 		cfg.fres = 1. / (data.nread/cfg.fsamp) * (1 + xov * (cfg.minAVG - 1));
-		cfg.nfft=round_down(cfg.fsamp/cfg.fres);	/* suitable nfft for FFTW */
+		cfg.nfft=round_downl(cfg.fsamp/cfg.fres);	/* suitable nfft for FFTW */
 		cfg.fres = cfg.fsamp / (double) cfg.nfft;
 	}
 	if (cfg.fmax < 0)
@@ -173,14 +173,15 @@ void getUserInput()
 			aski("Minimum number of averages", &cfg.minAVG);	
 		if (cfg.askdesAVG == 1)
 			aski("Desired number of averages", &cfg.desAVG);
-	} else if (cfg.METHOD == 1) {
+	}
+	else if (cfg.METHOD == 1) {
 		if (cfg.fres < 0) {
-			cfg.nfft=round_down(data.nread);
+			cfg.nfft=round_downl(data.nread);
 			cfg.fres = cfg.fsamp / (double) cfg.nfft;
 		}    
 		if (cfg.askfres == 1)
 			askd("Frequency resolution", &cfg.fres);
-		cfg.nfft=round_down(cfg.fsamp/cfg.fres);	/* suitable nfft for FFTW */
+		cfg.nfft=round_downl(cfg.fsamp/cfg.fres);	// suitable nfft for FFTW
 		cfg.fres = cfg.fsamp / (double) cfg.nfft;	
 		cfg.nspec = cfg.fmax/cfg.fres+1-dMax(cfg.sbin,cfg.fmin/cfg.fres);
 	}
@@ -240,7 +241,7 @@ void getDefaultValues()
 			xov = (1. - cfg.ovlp / 100.);
 			cfg.fres = 1. / (cfg.tmax - cfg.tmin) * (1 + xov * (cfg.minAVG - 1));
 		} else if (cfg.METHOD == 1) {
-			cfg.nfft=round_down(data.nread);
+			cfg.nfft=round_downl(data.nread);
 			cfg.fres = cfg.fsamp / (double) cfg.nfft;
 		}
 	}    

@@ -12,7 +12,7 @@ void fill_ordered_coefficients(int, int*);
 void calculateSpectrum(tCFG *cfg, tDATA *data);
 void calculate_lpsd(tCFG*, tDATA*);
 static void calc_params(tCFG*, tDATA*);
-static void getDFT2(int, double, double, double,
+static void getDFT2(long int, double, double, double,
                     double*, int*, struct hdf5_contents*);
 
 void calculate_fft_approx(tCFG*, tDATA*);

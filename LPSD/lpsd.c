@@ -71,7 +71,7 @@ int round (double x) {
 /********************************************************************************
  * 	global variables						   	
  ********************************************************************************/
-static int nread;
+static long int nread;
 static double winsum;
 static double winsum2;
 static double nenbw;		/* normalized equivalent noise bandwidth */
@@ -167,7 +167,7 @@ fill_ordered_coefficients(int n, int *coefficients) {
 
 
 static void
-getDFT2 (int nfft, double bin, double fsamp, double ovlp, double *rslt,
+getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
          int *avg, struct hdf5_contents *contents)
 {
   /* Configure variables for DFT */
@@ -184,9 +184,9 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, double *rslt,
   /* Calculate DFT over separate memory windows */
   int window_offset, count;
   int memory_unit_index = 0;
-  int remaining_samples = nfft;
+  long int remaining_samples = nfft;
   int nsum = floor(1+(nread - nfft) / floor(nfft * (1.0 - (double) (ovlp / 100.))));
-  int tmp = (nsum-1)*floor(nfft * (1.0 - (double) (ovlp / 100.)))+nfft;
+  long int tmp = (nsum-1)*floor(nfft * (1.0 - (double) (ovlp / 100.)))+nfft;
   if (tmp == nread) nsum--;  /* Adjust for edge case */
 
   double dft_results[2*nsum];  /* Real and imaginary parts of DFTs */
@@ -210,7 +210,7 @@ getDFT2 (int nfft, double bin, double fsamp, double ovlp, double *rslt,
                           window_offset, count, window_offset == 0);
 
     // Loop over data segments
-    int start = 0;
+    long int start = 0;
     register int _nsum = 0;
     hsize_t data_count[1] = {count};
     hsize_t data_rank = 1;
@@ -279,7 +279,7 @@ static void
 calc_params (tCFG * cfg, tDATA * data)
 {
   double fres, f, bin, g;
-  int i, i0, ndft;
+  long int i, i0, ndft;
 
   g = log ((*cfg).fmax / (*cfg).fmin);
   i = (*cfg).nspec * (*cfg).iter;
@@ -644,7 +644,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         int delta_segment = floor(Nj0 * (1.0 - (double) (cfg->ovlp / 100.)));
         int n_segments = floor(1 + (nread - Nj0) / delta_segment);
         /* Adjust for edge case */
-        int tmp = (n_segments - 1)*delta_segment + Nj0;
+        long int tmp = (n_segments - 1)*delta_segment + Nj0;
         if (tmp == nread) n_segments--;
 
 	// Allocate arrays used to store the results in between
@@ -657,9 +657,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 
         // Prepare FFT
 	// Whatever the value of max is, make it less than 2^31 or ints will break
-        int max_samples_in_memory = 33554432;  // 2^25 b = 0.5 Gb if double  // TODO: pass arg
-        // int max_samples_in_memory = 131072;  // 2^17, for testing #deleteme
-        long int Nfft = get_next_power_of_two(Nj0);
+        int max_samples_in_memory = 268435456;  // 2^28 b = 8 Gb if double  // TODO: pass arg
+	long int Nfft = get_next_power_of_two(Nj0);
         // Relevant frequency range in full fft space
         int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));
         int jfft_max = ceil(Nfft * cfg->fmin/cfg->fsamp * exp(j*g/(cfg->Jdes - 1.)));
