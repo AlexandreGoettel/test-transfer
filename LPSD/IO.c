@@ -273,10 +273,10 @@ static void writeHeaderLine(FILE *ofp, tGNUTERM * gt) {
 			fprintf(ofp, "Bin	");
 			break;
 		case 'r':
-			fprintf(ofp, "Re(PSD)   ");
+			fprintf(ofp, "Re(PSD)	");
 			break;
 		case 'i':
-			fprintf(ofp, "Im(PSD)   ");
+			fprintf(ofp, "Im(PSD)	");
                         break;
 		default:
 			strcpy(&tmp[0],&((*gt).fmt[0]));
