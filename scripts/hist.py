@@ -1,6 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit as fit
+from scipy.stats import skewnorm, powerlognorm
 
 
 def gaus(x, A, mu, sigma):
@@ -8,6 +9,19 @@ def gaus(x, A, mu, sigma):
 
 def log_gaus(x, A, mu, sigma):
     return A / (np.sqrt(2*np.pi)*sigma*x) * np.exp(-0.5*((np.log(x) - mu) / sigma)**2)
+
+def log_skew_gaus(x, A, mu, sigma, skewness):
+    return A*skewnorm.pdf(np.log(x), a=skewness, loc=mu, scale=sigma)
+
+def piecewise_log_gaus(x, sigma1, alpha, B, mu2, sigma2):
+    mu1 = (mu2 - sigma2**2 - np.log(alpha))*(sigma1 / sigma2)**2 + sigma2**2 + np.log(alpha)
+    A = B*sigma1/sigma2 * np.exp(-0.5*(((np.log(alpha) - mu2) / sigma2)**2 - ((np.log(alpha) - mu1) / sigma1)**2))
+    
+    mask_right = x >= alpha
+    output = np.zeros_like(x)
+    output[~mask_right] = log_gaus(x[~mask_right], A, mu1, sigma1)
+    output[mask_right] = log_gaus(x[mask_right], B, mu2, sigma2)
+    return output
 
 
 def fit_hist(f, data, bins, p0=None):
@@ -75,6 +89,10 @@ def plot_func_hist(f, args, data, bin_edges, ax=None,
     # Plot function
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     bin_width = bin_edges[1:] - bin_edges[:-1]
-    ax.plot(bin_centers, f(bin_centers, *args) * bin_width, color=color)
+    if logx:
+        x = np.logspace(np.log10(min(bin_centers)), np.log10(max(bin_centers)), 1000)
+    else:
+        x = np.linspace(min(bin_centers), max(bin_centers), 1000)
+    ax.plot(x, f(x, *args) * bin_width, color=color)
     
     return ax
