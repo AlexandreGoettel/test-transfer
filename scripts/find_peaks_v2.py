@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -34,7 +35,7 @@ def distr_var(x, y):
 
 
 # TODO: extract settings from nohup.out
-def main():
+def main(filename):
     """Find peaks in a block-approximation output file."""
     # Configure data
     fs = 16384  # Hz
@@ -42,7 +43,6 @@ def main():
     fmax = 8192  # Hz
     resolution = 1e-6
     epsilon = 0.1
-    filename = "../o3-lpsd-results/result_epsilon10_1243393026_1243509654_L1.txt"
     
     # Get data & block positions
     pf = PeakFinder(fs=fs, resolution=resolution, fmin=fmin, fmax=fmax, epsilon=epsilon, name=filename)
@@ -51,7 +51,7 @@ def main():
     # Configure analysis
     nbins = 400
     n_sigma = 4
-    n_poly = 3
+    n_poly = 1
     max_chi = 9
     
     chi_sqr = np.zeros(len(positions) - 1)
@@ -99,7 +99,7 @@ def main():
         # Fit poly through baseline baseline
         def poly(x, *args, deg=2):
             output = np.zeros_like(x)
-            for i in range(deg):
+            for i in range(deg+1):
                 output += x**(deg-i)*args[i]
             return output
         
@@ -176,14 +176,14 @@ def main():
             mu, sigma = mode, np.sqrt(get_skew_norm_var(popt[3], popt[2]))
         
         # tmp - plots
-        p1, p2 = positions[i_segment], positions[i_segment+1]
-        if not np.isinf(chi_sqr[i_segment]):
-            ax = hist.plot_func_hist(f, popt, yClean, bins)
-            ax.set_title(f"{i_segment}:{chi_sqr[i_segment]:.2f}, {pf.freq[p1]:.1f}-{pf.freq[p2]:.1f}Hz")
-            ax.axvline(mu, color="r", linewidth=2.5)
-            ax.axvline(_lo, color="g", linestyle="--")
-            ax.axvline(_hi, color="g", linestyle="--")
-            plt.show()
+        # p1, p2 = positions[i_segment], positions[i_segment+1]
+        # if not np.isinf(chi_sqr[i_segment]):
+        #     ax = hist.plot_func_hist(f, popt, yClean, bins)
+        #     ax.set_title(f"{i_segment}:{chi_sqr[i_segment]:.2f}, {pf.freq[p1]:.1f}-{pf.freq[p2]:.1f}Hz")
+        #     ax.axvline(mu, color="r", linewidth=2.5)
+        #     ax.axvline(_lo, color="g", linestyle="--")
+        #     ax.axvline(_hi, color="g", linestyle="--")
+        #     plt.show()
 
         # Whiten block
         p1, p2 = positions[i_segment], positions[i_segment+1]
@@ -247,11 +247,17 @@ def main():
     ax.set_xscale("log")
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("Cleaned PSD")
+    ax.set_title(os.path.split(filename)[-1])
+    ax.set_ylim(-5, 20)
     plt.show()
     
 
 if __name__ == '__main__':
-    main()
+    # filename = "../o3-lpsd-results/result_epsilon10_1243393026_1243509654_L1.txt"
+    PATH = "/home/alexandre/work/cardiff/LPSD/o3-lpsd-results"
+    for filename in [x for x in os.listdir(PATH) if x.endswith(".txt")]:
+        print(filename)
+        main(os.path.join(PATH, filename))
 
 
 # Notes:
