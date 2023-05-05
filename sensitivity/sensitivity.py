@@ -2,7 +2,7 @@
 # Project imports
 from sensparser import parse_inputs
 from fakedata import DataManager
-# from output import Reader
+from output import write_lpsd_sh
 # from peakfinder import PeakFinder
 
 
@@ -17,8 +17,10 @@ def main(**kwargs):
         #   - Write to file
         manager.generate_noise()
         manager.plot_data()
-        manager.add_injections()
+        manager.add_injections()  # TODO
         manager.save_data()
+        if kwargs["gen_lpsd_sh"]:
+            write_lpsd_sh(**kwargs)
     elif kwargs["analysis"] == "analyse":
         pass
         #   - Read LPSD output

@@ -27,6 +27,7 @@ class DataManager:
         assert filename.endswith(".h5") or filename.endswith(".hdf5")
 
         # Save strain and PSD as separate datasets
+        print(f"Writing to {filename}..")
         with h5py.File(filename, 'w') as hdf_file:
             hdf_file.create_dataset("strain", data=self.time_data["strain"].values)
             hdf_file.create_dataset("PSD", data=self.freq_data["PSD"].values)
@@ -55,8 +56,6 @@ class DataManager:
             ax = plt.subplot(111)
             ax.set_xscale("log")
             ax.set_yscale("log")
-            # PSD = .5*(self.freq_data["ASD"].apply(np.real)**2 +
-            #           self.freq_data["ASD"].apply(np.imag)**2)
             ax.plot(self.freq_data["frequencies"], self.freq_data["PSD"])
             ax.set_xlabel("Frequency (Hz)")
             ax.set_ylabel("PSD")
@@ -73,12 +72,10 @@ class NoiseGenerator:
     def psd_from_spline(self):
         """Generate a function from pre-fitted spline data."""
         # Spline is defined between 10 and 8192 Hz
-        xKnots = np.array([2.302585092994046, 2.8903717578961645, 4.2626798770413155,
-                           8.715880102296456, 8.922658299524402, 8.944722061463125,
-                           8.966785823401846, 8.988849585340567, 9.010913347279288])
-        yKnots = np.array([-90.85250009224018, -98.34020860963307, -105.1104943448692,
-                           -102.14341153614997, -103.27561860287713, -104.60337149292064,
-                           -107.11719068658745, -106.15116842575307, -124.73606096321296])
+        xKnots = np.array([2.30258509, 3.04941017, 3.79623525,
+                           8.65059825, 8.95399594, 8.97733423, 9.02401079])
+        yKnots = np.array([-91.80878694876485, -99.97801940114547, -103.57729069085298,
+                           -102.17121965, -104.34025547329, -105.9256036217, -130.06995841416])
 
         def linspace_spline(x):
             # This is needed because the spline was fitted in log-log space
@@ -133,7 +130,7 @@ class NoiseGenerator:
 
         # Save output
         time_data = pd.DataFrame(
-            {"strain": np.fft.ifft(data)[:N-1],
+            {"strain": np.fft.ifft(data)[:N-1].real,
              "time": np.arange(0, 1./(2. * max_f)*(N-1), 1./(2. * max_f))}
             )
         freq_data = pd.DataFrame(

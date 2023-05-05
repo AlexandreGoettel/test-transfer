@@ -41,4 +41,18 @@ def parse_inputs():
     noiseParser.add_argument("--output-file", type=str,
                              required=False, default="",
                              help="Where to store generated time series, must be .h5 or .hdf5")
+
+    LPSDParser = parser.add_argument_group("LPSD .sh args")
+    LPSDParser.add_argument("--gen-lpsd-sh", action="store_true",
+                            help="Whether to generate an .sh file for LPSD.")
+    LPSDParser.add_argument("--fmin", type=float, required=False,
+                            default=10.)
+    LPSDParser.add_argument("--fmax", type=float, required=False,
+                            default=8192.)
+    LPSDParser.add_argument("--resolution", type=float, required=False,
+                            default=1e-6)
+    LPSDParser.add_argument("--path-to-lpsd-exec", type=str, required=False,
+                            default="")
+    LPSDParser.add_argument("--sh_filename", type=str, required=False,
+                            default="")
     return parser.parse_args()
