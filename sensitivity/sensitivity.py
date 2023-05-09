@@ -16,8 +16,8 @@ def main(**kwargs):
         #   - Generate time series from noise+injections
         #   - Write to file
         manager.generate_noise()
+        manager.add_injections()
         manager.plot_data()
-        manager.add_injections()  # TODO
         manager.save_data()
         if kwargs["gen_lpsd_sh"]:
             write_lpsd_sh(**kwargs)

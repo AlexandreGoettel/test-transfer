@@ -16,7 +16,7 @@ def write_lpsd_sh(output_file=None, length=3600, sampling_frequency=16384,
     """Save relevant parameters and write .sh file to run LPSD."""
     # Make sure relevant vars have been parsed
     assert path_to_lpsd_exec != "" and output_file != "" and sh_filename != ""
-    
+
     # Take care of abs. vs rel. paths.
     if not output_file.startswith("/"):
         output_file = os.path.join(os.getcwd(), output_file)
@@ -28,7 +28,7 @@ def write_lpsd_sh(output_file=None, length=3600, sampling_frequency=16384,
 
     if fmin_from_length > fmin:
         print(f"Warning: using fmin={fmin_from_length}Hz instead of supplied {fmin}Hz" +
-                "because data length is insufficient.")
+                " because data length is insufficient.")
         fmin = fmin_from_length
 
     number_of_frequencies = utils.get_Jdes(fmin, fmax, resolution)

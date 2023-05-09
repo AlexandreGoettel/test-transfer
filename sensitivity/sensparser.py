@@ -19,14 +19,18 @@ def parse_inputs():
                            choices=["sinelike", "DMlike"], default="DMlike",
                            help="Inject sine waves or DM-type waves?")
     injParser.add_argument("--injection-type", type=str, required=False,
-                           choices=["None", "from-file", "given-frequencies", "logspace"],
-                           help="Where to place injections. If 'from-file' use --injection-file," +
+                           choices=["None", "injection-file", "given-frequencies"],
+                           default="None",
+                           help="If 'injection-file' use --injection-file," +
                            "if 'given-frequencies' use --injection-frequencies.")
     injParser.add_argument("--injection-file", type=str, required=False,
-                           help="Filename containing frequencies at which to generate injections.")
+                           help="Filename containing frequencies and amplitudes for injections.")
     injParser.add_argument("--injection-frequencies", type=float, required=False,
                            nargs="*", default=[],
                            help="List of frequencies if --injection-type is 'given-frequencies'")
+    injParser.add_argument("--injection-amplitudes", type=float, required=False,
+                           nargs="*", default=[],
+                           help="Amplitudes to accompany 'injection-frequencies'.")
 
     noiseParser = parser.add_argument_group("Noise generation args")
     noiseParser.add_argument("--noise-source", type=str, required=False,
@@ -46,13 +50,13 @@ def parse_inputs():
     LPSDParser.add_argument("--gen-lpsd-sh", action="store_true",
                             help="Whether to generate an .sh file for LPSD.")
     LPSDParser.add_argument("--fmin", type=float, required=False,
-                            default=10.)
+                            default=10., help="Minimum LPSD frequency.")
     LPSDParser.add_argument("--fmax", type=float, required=False,
-                            default=8192.)
+                            default=8192., help="Maximum LPSD frequency.")
     LPSDParser.add_argument("--resolution", type=float, required=False,
-                            default=1e-6)
+                            default=1e-6, help="LPSD frequency resolution")
     LPSDParser.add_argument("--path-to-lpsd-exec", type=str, required=False,
                             default="")
-    LPSDParser.add_argument("--sh_filename", type=str, required=False,
+    LPSDParser.add_argument("--sh-filename", type=str, required=False,
                             default="")
     return parser.parse_args()

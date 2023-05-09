@@ -4,6 +4,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from scipy.interpolate import CubicSpline
 import h5py
+import utils
 
 
 class DataManager:
@@ -13,12 +14,30 @@ class DataManager:
         self.kwargs = kwargs
 
         self.noise_generator = NoiseGenerator(**kwargs)
+        self.signal_generator = SignalGenerator(**kwargs)
         self.time_data, self.freq_data = None, None
 
-    def add_injections(self, **kwargs):
+    def add_injections(self):
         """Inject signals into the time series."""
         # Use "injection_type", "injection_file", "injection_frequencies"
-        pass  # TODO
+        injection_type = self.kwargs["injection_type"]
+        if injection_type == "None":
+            print("injection-type = None, skipping injections..")
+            return
+        if self.kwargs["wavetype"] != "sinelike":
+            raise ValueError("Only sinelike injections implemented.")  # TODO
+        else:
+            injector = self.signal_generator.inject_sine
+
+        if injection_type == "given-frequencies":
+            for freq, amp in zip(self.kwargs["injection_frequencies"],
+                                 self.kwargs["injection_amplitudes"]):
+                self.time_data["strain"] += injector(len(self.time_data["strain"]), freq, amp)
+
+        if injection_type == "injection-file":
+            injData = utils.safe_loadtxt(self.kwargs["injection_file"], dtype=float)
+            for freq, amp in zip(injData[:, 0], injData[:, 1]):
+                self.time_data["strain"] += injector(len(self.time_data["strain"]), freq, amp)
 
     def save_data(self):
         """Save PSD and time series to HDF."""
@@ -75,7 +94,7 @@ class NoiseGenerator:
         xKnots = np.array([2.30258509, 3.04941017, 3.79623525,
                            8.65059825, 8.95399594, 8.97733423, 9.02401079])
         yKnots = np.array([-91.80878694876485, -99.97801940114547, -103.57729069085298,
-                           -102.17121965, -104.34025547329, -105.9256036217, -130.06995841416])
+                           -102.17121965438, -104.34025547329, -105.9256036217, -130.06995841416])
 
         def linspace_spline(x):
             # This is needed because the spline was fitted in log-log space
@@ -143,4 +162,10 @@ class NoiseGenerator:
 
 class SignalGenerator:
     """Create time domain injections for sine-like and DM-like signals."""
-    pass  # TODO
+    def __init__(self, sampling_frequency=16384., **_):
+        self.fs = sampling_frequency
+
+    def inject_sine(self, N, f, A):
+        """Inject a sine wave of frequency f and amplitude A in a N-length array."""
+        t = np.arange(N) / self.fs
+        return A * np.sin(2.*np.pi * f * t)
