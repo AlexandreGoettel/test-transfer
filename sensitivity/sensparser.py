@@ -59,4 +59,6 @@ def parse_inputs():
                             default="")
     LPSDParser.add_argument("--sh-filename", type=str, required=False,
                             default="")
+    LPSDParser.add_argument("--lpsd-output", type=str, required=False,
+                            default="", help="LPSD output file path.")
     return parser.parse_args()

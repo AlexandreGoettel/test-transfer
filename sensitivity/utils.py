@@ -14,11 +14,13 @@ def get_fmin(length, resolution):
     return 1. / (length * resolution)
 
 
-def safe_loadtxt(filename, delimiter="\t", **kwargs):
+def safe_loadtxt(filename, delimiter="\t", usecols=None, **kwargs):
     """Read in a txt file with an arbitrary number of header lines starting with '#'."""
     # Make sure there are no duplicates
     if "skiprows" in kwargs:
         kwargs.pop("skiprows")
+    if usecols is None:
+        usecols = [0, 1]
 
     # Abs. vs rel. path
     if not filename.startswith("/"):
@@ -33,5 +35,16 @@ def safe_loadtxt(filename, delimiter="\t", **kwargs):
             num_header_lines += 1
 
     # Load the data using np.loadtxt(), skipping the header lines
-    return np.loadtxt(filename, delimiter=delimiter,
+    return np.loadtxt(filename, delimiter=delimiter, usecols=usecols    ,
                       skiprows=num_header_lines, **kwargs)
+
+
+def getBinVars(y, nbins, log=False):
+    """Return bin delimiters with bin_center and width information."""
+    if log:
+        bins = np.logspace(np.log10(min(y)), np.log10(max(y)), nbins, base=10)
+    else:
+        bins = np.linspace(min(y), max(y), nbins)
+    bin_centers = (bins[:-1] + bins[1:]) / 2.
+    bin_width = bins[1:] - bins[:-1]  # not always a constant!
+    return bins, bin_centers, bin_width
