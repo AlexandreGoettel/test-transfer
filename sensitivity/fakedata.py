@@ -1,4 +1,5 @@
 """Define classes to manage noise and signal data for injections."""
+from tqdm import tqdm
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import CubicSpline
@@ -13,6 +14,7 @@ class DataManager:
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.nmax = kwargs["nmax"]
 
         self.datafile = h5py.File(self.kwargs["output_file"], "w")
         self.noise_generator = NoiseGenerator(self.datafile, **kwargs)
@@ -21,27 +23,39 @@ class DataManager:
     def __del__(self):
         self.datafile.close()
 
-    def add_injections(self):
-        """Inject signals into the time series."""
+    def add_injections(self, dset="strain"):
+        """Inject signals into the time series in self.datafile[dset]."""
         # Use "injection_type", "injection_file", "injection_frequencies"
         injection_type = self.kwargs["injection_type"]
         if injection_type == "None":
-            print("injection-type = None, skipping injections..")
+            print("'injection-type' = None, skipping injections..")
             return
+        # Get the injector for the kind of wave to inject
         if self.kwargs["wavetype"] != "sinelike":
             raise ValueError("Only sinelike injections implemented.")  # TODO
         else:
             injector = self.signal_generator.inject_sine
 
+        # Get the frequencies and amplitudes to inject
         if injection_type == "given-frequencies":
-            for freq, amp in zip(self.kwargs["injection_frequencies"],
-                                 self.kwargs["injection_amplitudes"]):
-                self.time_data["strain"] += injector(len(self.time_data["strain"]), freq, amp)
+            freq_amp_gen = zip(self.kwargs["injection_frequencies"],
+                               self.kwargs["injection_amplitudes"])
+            N_gen = len(self.kwargs["injection_frequencies"])
 
-        if injection_type == "injection-file":
+        elif injection_type == "injection-file":
             injData = utils.safe_loadtxt(self.kwargs["injection_file"], dtype=float)
-            for freq, amp in zip(injData[:, 0], injData[:, 1]):
-                self.time_data["strain"] += injector(len(self.time_data["strain"]), freq, amp)
+            injData = np.atleast_2d(injData)
+            freq_amp_gen = zip(injData[:, 0], injData[:, 1])
+            N_gen = injData.shape[0]
+
+        # Perform injection(s)
+        N = len(self.datafile[dset])
+        print("Injecting signals..")
+        for freq, amp in tqdm(freq_amp_gen, total=N_gen):
+            for start_index in range(0, N, self.nmax):
+                end_index = min(start_index + self.nmax, N)
+                signal = injector(start_index, end_index, freq, amp)
+                self.datafile[dset][start_index:end_index] += signal
 
     def generate_noise(self):
         """Generate data using the NoiseGenerator class."""
@@ -49,11 +63,10 @@ class DataManager:
 
     def plot_data(self):
         """Plot the strain and ASD data if it exists."""
-        # TOOD: fix for low nmax..
         if "strain" in self.datafile:
             # Check if there is more data than nmax, reduce appropriately
             dset = self.datafile["strain"]
-            stride = max(1, int(1 + len(dset) / self.kwargs["nmax"]))
+            stride = max(1, int(1 + len(dset) / self.nmax))
             strain = dset[::stride]
             t = np.arange(0, len(dset)*dset.attrs["delta_t"],
                           dset.attrs["delta_t"]*stride)
@@ -66,7 +79,7 @@ class DataManager:
         if "ASD_complex" in self.datafile:
             # Idem for PSD
             dset = self.datafile["ASD_complex"]
-            stride = max(1, int(1 + len(dset) / self.kwargs["nmax"]))
+            stride = max(1, int(1 + len(dset) / self.nmax))
             N = (len(dset) - 1) // 2
             ASD = dset[1:N+1:stride]
             PSD = .5 * np.sqrt(ASD.real**2 + ASD.imag**2)
@@ -163,7 +176,8 @@ class NoiseGenerator:
         # Loop over memory units to write quasi-symmetric f-array
         start, dset_index = delta_f, 0  # start in f-space, not index
         psd_func = self.psd_func()
-        while start < max_f + delta_f:
+        print("Generating noise..")
+        for start in tqdm(np.arange(delta_f, max_f + delta_f, self.nmax * delta_f)):
             # Loop condition
             end = min(max_f + delta_f, start + self.nmax * delta_f)
 
@@ -182,17 +196,16 @@ class NoiseGenerator:
             else:
                 dset[-(dset_index+M)+int(last_iteration):] = np.conjugate(data[-2::-1])\
                     if last_iteration else np.conjugate(data[::-1])
-            start = end
             dset_index += M
         dset[0] = 0  # DC-component
 
         # Aply iFFT and store "complex_strain" dataset
         self.datafile.create_dataset("complex_strain", (n_time,), dtype=np.complex128)
         if n_time <= self.nmax:
-            print("USING NORMAL iFFT")
+            print("Performing NORMAL iFFT..")
             self.datafile["complex_strain"][:] = fft.FFT(dset, reverse=True, is_top_level=True)
         else:
-            print("USING MEMORY iFFT")
+            print("Performing MEMORY iFFT..")
             self.datafile.create_dataset("freq_data", data=dset, dtype=np.complex128)
             fft.memory_FFT(n_time, n_time, self.nmax, self.datafile, self.datafile,
                            "freq_data", "complex_strain", reverse=True)
@@ -201,6 +214,7 @@ class NoiseGenerator:
         # Save only real part
         # Imaginary parts should be negligible anyway
         dset_strain = self.datafile["complex_strain"]
+        print("Project complex to real..")
         if self.nmax <= n_time:
             dset_real = self.datafile.create_dataset("strain", (n_time,), dtype=np.float64)
             for start in range(0, n_time, self.nmax):
@@ -225,7 +239,7 @@ class SignalGenerator:
         self.fs = sampling_frequency
         self.datafile = datafile
 
-    def inject_sine(self, N, f, A):
+    def inject_sine(self, start_idx, end_idx, f, A):
         """Inject a sine wave of frequency f and amplitude A in a N-length array."""
-        t = np.arange(N) / self.fs
-        return A * np.sin(2.*np.pi * f * t)
+        t = np.arange(start_idx, end_idx) / self.fs
+        return A * np.sin(2. * np.pi * f * t)
