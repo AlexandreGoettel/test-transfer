@@ -148,12 +148,11 @@ class NoiseGenerator:
     def process_chunk(self, start, end, delta_f, psd_func, seed=42):
         """Simulate complex-valued fft output noise in frequency domain."""
         positive_freqs = np.arange(start, end, delta_f)
-        freq_data = np.sqrt(2. * psd_func(positive_freqs))  # ASD
+        freq_data = np.sqrt(2. * psd_func(positive_freqs))  # PSD->ASD
         # Give each freq. a random phase and use it to generate a complex signal
         np.random.seed(self.starting_seed + seed)
         phase_data = np.random.random(size=len(freq_data)) * 2. * np.pi
-        complex_freq_data = freq_data * np.exp(1j * phase_data)
-        return complex_freq_data
+        return freq_data * np.exp(1j * phase_data)
 
     def freq_to_time(self):
         """Generate a random time series from the PSD."""
@@ -206,9 +205,8 @@ class NoiseGenerator:
             self.datafile["complex_strain"][:] = fft.FFT(dset, reverse=True, is_top_level=True)
         else:
             print("Performing MEMORY iFFT..")
-            self.datafile.create_dataset("freq_data", data=dset, dtype=np.complex128)
             fft.memory_FFT(n_time, n_time, self.nmax, self.datafile, self.datafile,
-                           "freq_data", "complex_strain", reverse=True)
+                           dset, "complex_strain", reverse=True)
             del self.datafile["freq_data"]
 
         # Save only real part
