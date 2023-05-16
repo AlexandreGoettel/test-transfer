@@ -53,18 +53,22 @@ def FFT(data, reverse=True, is_top_level=True):
 
 
 def memory_FFT(Nj0, Nfft, Nmax, fcontents, f_contents,
+               dset_name="data", _dset_name="data",
                segment_offset=0, reverse=True):
-    # contents contains the data of length Nj0
-    # _contents contains the output of length Nfft
-    # Nmax is the number used to build the pyramid
-    # Nmax and Nfft MUST be powers of two (and int)
-
+    """
+    Perform an FFT(or iFFT) that only loads a few multiples of Nmax in memory.
+    
+    contents contains the data of length Nj0
+    _contents contains the output of length Nfft
+    Nmax is the number used to build the pyramid
+    Nmax and Nfft MUST be powers of two (and int)
+    """
     n_depth = int(np.round(np.log2(Nfft) - np.log2(Nmax)))
     two_to_n_depth = 2**n_depth
     Nj0_over_two_n_depth = Nj0 // two_to_n_depth
     ordered_coefficients = fill_ordered_coefficients(n_depth)
 
-    contents, _contents = fcontents["data"], f_contents["data"]
+    contents, _contents = fcontents[dset_name], f_contents[_dset_name]
 
     # Perform FFTs on bottom layer of pyramid and save results to temporary file
     for i in range(two_to_n_depth):
@@ -212,4 +216,5 @@ def compare_fft_np_fft():
 
 if __name__ == '__main__':
     compare_memory_iFFT_and_np_ifft()
-    # compare_fft_np_fft()
+    compare_fft_np_fft()
+    compare_memory_FFT_and_np_fft()
