@@ -206,7 +206,7 @@ class NoiseGenerator:
         else:
             print("Performing MEMORY iFFT..")
             fft.memory_FFT(n_time, n_time, self.nmax, self.datafile, self.datafile,
-                           dset, "complex_strain", reverse=True)
+                           dname, "complex_strain", reverse=True)
             del self.datafile["freq_data"]
 
         # Save only real part
