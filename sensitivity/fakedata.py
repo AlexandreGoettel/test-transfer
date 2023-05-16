@@ -91,6 +91,9 @@ class NoiseGenerator:
         self.kwargs = kwargs
         self.nmax = kwargs["nmax"]  # How much to put in memory at one time
         self.datafile = datafile
+        # Initialise entropy
+        np.random.seed()
+        self.starting_seed = np.random.randint(int(2**31))
 
     def psd_from_spline(self):
         """Generate a function from pre-fitted spline data."""
@@ -134,7 +137,7 @@ class NoiseGenerator:
         positive_freqs = np.arange(start, end, delta_f)
         freq_data = np.sqrt(2. * psd_func(positive_freqs))  # ASD
         # Give each freq. a random phase and use it to generate a complex signal
-        np.random.seed(seed)
+        np.random.seed(self.starting_seed + seed)
         phase_data = np.random.random(size=len(freq_data)) * 2. * np.pi
         complex_freq_data = freq_data * np.exp(1j * phase_data)
         return complex_freq_data
