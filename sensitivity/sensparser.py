@@ -45,6 +45,9 @@ def parse_inputs():
     noiseParser.add_argument("--output-file", type=str,
                              required=False, default="",
                              help="Where to store generated time series, must be .h5 or .hdf5")
+    noiseParser.add_argument("--nmax", type=int,
+                             required=False, default=int(2**27),
+                             help="Maximum number of floats in memory for iFFT.")
 
     LPSDParser = parser.add_argument_group("LPSD .sh args")
     LPSDParser.add_argument("--gen-lpsd-sh", action="store_true",
