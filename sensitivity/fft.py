@@ -1,3 +1,4 @@
+from tqdm import tqdm, trange
 import numpy as np
 import h5py
 
@@ -71,7 +72,7 @@ def memory_FFT(Nj0, Nfft, Nmax, fcontents, f_contents,
     contents, _contents = fcontents[dset_name], f_contents[_dset_name]
 
     # Perform FFTs on bottom layer of pyramid and save results to temporary file
-    for i in range(two_to_n_depth):
+    for i in trange(two_to_n_depth):
         # Read data
         offset = ordered_coefficients[i] + segment_offset
         Ndata = Nj0_over_two_n_depth + 1 if ordered_coefficients[i] + Nj0_over_two_n_depth*two_to_n_depth < Nj0 else Nj0_over_two_n_depth
@@ -88,6 +89,7 @@ def memory_FFT(Nj0, Nfft, Nmax, fcontents, f_contents,
         _contents[offset:offset+Nmax] = fft_output
 
     # Now loop over the rest of the pyramid
+    progress_bar = tqdm(total=np.sum(2**np.arange(n_depth)))
     while n_depth > 0:
         # Iterate n_depth
         n_depth -= 1
@@ -128,7 +130,8 @@ def memory_FFT(Nj0, Nfft, Nmax, fcontents, f_contents,
                 # Combine right side
                 offset_right = (j + (2 * i_pyramid + 1) * n_mem_units) * Nmax
                 _contents[offset_right:offset_right + Nmax] = even_terms - odd_terms
-
+        progress_bar.update(two_to_n_depth)
+    progress_bar.close()
 
 def compare_memory_FFT_and_np_fft():
     # Generate random input data
