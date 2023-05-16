@@ -129,12 +129,9 @@ class NoiseGenerator:
             return x
         return extrapolator
 
-    def process_chunk(self, start, end, delta_f, psd_func,
-                      last_iteration=False, seed=42):
+    def process_chunk(self, start, end, delta_f, psd_func, seed=42):
         """Simulate complex-valued fft output noise in frequency domain."""
         positive_freqs = np.arange(start, end, delta_f)
-        # if last_iteration and not len(positive_freqs) % 2:
-        #     positive_freqs = np.append(positive_freqs, [positive_freqs[-1]+delta_f])
         freq_data = np.sqrt(2. * psd_func(positive_freqs))  # ASD
         # Give each freq. a random phase and use it to generate a complex signal
         np.random.seed(seed)
@@ -168,15 +165,14 @@ class NoiseGenerator:
             end = min(max_f + delta_f, start + self.nmax * delta_f)
 
             # Create complex ASD data
-            last_iteration = start + self.nmax * delta_f >= max_f + delta_f
             _seed = int((start - delta_f) / (self.nmax * delta_f)) + 1
-            data = self.process_chunk(start, end, delta_f, psd_func,
-                                      last_iteration, seed=_seed)
+            data = self.process_chunk(start, end, delta_f, psd_func, _seed)
 
-            M = len(data)
             # Write in fft-output format to prepare for iFFT
+            M = len(data)
             dset[1+dset_index:1+dset_index + M] = data
 
+            last_iteration = start + self.nmax * delta_f >= max_f + delta_f
             if dset_index:
                 dset[-(dset_index+M)+int(last_iteration):-dset_index] = np.conjugate(data[-2::-1])\
                     if last_iteration else np.conjugate(data[::-1])
