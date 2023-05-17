@@ -82,7 +82,7 @@ class DataManager:
             stride = max(1, int(1 + len(dset) / self.nmax))
             N = (len(dset) - 1) // 2
             ASD = dset[1:N+1:stride]
-            PSD = .5 * np.sqrt(ASD.real**2 + ASD.imag**2)
+            PSD = .5 * (ASD.real**2 + ASD.imag**2)
             freq = np.arange(dset.attrs["f0"],
                              dset.attrs["delta_f"]*len(PSD) + dset.attrs["f0"],
                              dset.attrs["delta_f"])
@@ -207,7 +207,7 @@ class NoiseGenerator:
             print("Performing MEMORY iFFT..")
             fft.memory_FFT(n_time, n_time, self.nmax, self.datafile, self.datafile,
                            dname, "complex_strain", reverse=True)
-            del self.datafile["freq_data"]
+            del self.datafile[dname]
 
         # Save only real part
         # Imaginary parts should be negligible anyway
