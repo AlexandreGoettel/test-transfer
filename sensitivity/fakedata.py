@@ -219,7 +219,7 @@ class NoiseGenerator:
         print("Project complex to real..")
         if self.nmax <= n_time:
             dset_real = self.datafile.create_dataset("strain", (n_time,), dtype=np.float64)
-            for start in range(0, n_time, self.nmax):
+            for start in trange(0, n_time, self.nmax):
                 end = min(start + self.nmax, n_time)
                 dset_real[start:end] = dset_strain[start:end].real
         else:
