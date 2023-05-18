@@ -1,5 +1,5 @@
 """Define classes to manage noise and signal data for injections."""
-from tqdm import tqdm
+from tqdm import tqdm, trange
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import CubicSpline
@@ -51,11 +51,15 @@ class DataManager:
         # Perform injection(s)
         N = len(self.datafile[dset])
         print("Injecting signals..")
-        for freq, amp in tqdm(freq_amp_gen, total=N_gen):
-            for start_index in range(0, N, self.nmax):
-                end_index = min(start_index + self.nmax, N)
-                signal = injector(start_index, end_index, freq, amp)
-                self.datafile[dset][start_index:end_index] += signal
+        for start_index in trange(0, N, self.nmax,
+                                  desc="Memory unit", position=0):
+            end_index = min(start_index + self.nmax, N)
+            signal = np.zeros(end_index - start_index)
+            for freq, amp in tqdm(freq_amp_gen, total=N_gen,
+                                  desc="Injection frequency", position=1, leave=False):
+                signal += injector(start_index, end_index, freq, amp)
+            # Write to file
+            self.datafile[dset][start_index:end_index] += signal
 
     def generate_noise(self):
         """Generate data using the NoiseGenerator class."""
