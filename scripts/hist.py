@@ -1,8 +1,8 @@
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.gridspec import GridSpec
 from scipy.optimize import curve_fit as fit
 from scipy.stats import skewnorm
-from scipy.special import lambertw
 
 
 def gaus(x, A, mu, sigma):
@@ -21,7 +21,7 @@ def reverse_log_gaus(x, A, mu, sigma, right=True):
     right=True to get the value on the right side of the peak.
     Set False for the left side.
     """
-    
+
     sqrt_term = sigma**2 - 2.*(mu + np.log(x*np.sqrt(2*np.pi)*sigma/A))
     if right:
         return np.exp(mu - sigma**2 + sigma*np.sqrt(sqrt_term))
@@ -33,8 +33,9 @@ def log_skew_gaus(x, A, mu, sigma, skewness):
 def piecewise_log_gaus(x, sigma1, alpha, B, mu2, sigma2):
     alpha, B = np.abs(alpha), np.abs(B)  # Must be positive
     mu1 = (mu2 - sigma2**2 - np.log(alpha))*(sigma1 / sigma2)**2 + sigma2**2 + np.log(alpha)
-    A = B*sigma1/sigma2 * np.exp(-0.5*(((np.log(alpha) - mu2) / sigma2)**2 - ((np.log(alpha) - mu1) / sigma1)**2))
-    
+    A = B*sigma1/sigma2 * np.exp(-0.5*(((np.log(alpha) - mu2) / sigma2)**2 -\
+        ((np.log(alpha) - mu1) / sigma1)**2))
+
     mask_right = x >= alpha
     output = np.zeros_like(x)
     output[~mask_right] = log_gaus(x[~mask_right], A, mu1, sigma1)
@@ -42,7 +43,7 @@ def piecewise_log_gaus(x, sigma1, alpha, B, mu2, sigma2):
     return output
 
 
-def fit_hist(f, data, bins, p0=None):
+def fit_hist(f, data, bins, p0=None, get_chi_sqr=False, isHist=False):
     """
     Proper chi-square fit.
     
@@ -50,7 +51,8 @@ def fit_hist(f, data, bins, p0=None):
     data: data to be histogrammed in bins (passed to np.histogram).
     p0: starting parameters for the fit. If not given std. gaus params will be applied.
     """
-    h0, bin_edges = np.histogram(data, bins)
+    # TODO: do N-independent fit!
+    h0, bin_edges = (data, bins) if isHist else np.histogram(data, bins)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     bin_width = bin_edges[1:] - bin_edges[:-1]
     
@@ -70,11 +72,22 @@ def fit_hist(f, data, bins, p0=None):
     # Second fit using output of previous one
     popt, pcov = fit(f, bin_centers, h0/bin_width, p0=p0,
                      sigma=np.sqrt(h0)/bin_width, absolute_sigma=True)
-    
-    return popt, pcov
+
+    if not get_chi_sqr:
+        return popt, pcov
+
+    # Protect against strongly decreasing functions
+    func_values = f(bin_centers, *popt)
+    mask = func_values != 0
+    h0, func_values, bin_width = h0[mask], func_values[mask], bin_width[mask]
+    chi_sqr = np.sum(
+        np.power(h0 - bin_width*func_values, 2) / (bin_width*func_values)
+    )
+    return popt, pcov, chi_sqr / (len(h0) - len(popt))
 
 
-def plot_hist(data, bin_edges, ax=None, range=None, logx=False, logy=False):
+def plot_hist(data, bin_edges, ax=None, xrange=None, do_errorbar=False,
+              logx=False, logy=False, color=None, **kwargs):
     """Plot a histogram, return ax."""
     if ax is None:
         plt.figure()
@@ -83,31 +96,46 @@ def plot_hist(data, bin_edges, ax=None, range=None, logx=False, logy=False):
         ax.set_yscale("log")
     if logx:
         ax.set_xscale("log")
+    if type(bin_edges) == int:
+        bin_edges = np.linspace(min(data), max(data), bin_edges)
 
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
-    if range is None:
+    if xrange is None:
         # Assume bins all have the same size
         bin_width = bin_edges[1] - bin_edges[0]
-        range = (min(bin_centers) - bin_width, max(bin_centers) + bin_width)
-    
+        xrange = (min(bin_centers) - bin_width, max(bin_centers) + bin_width)
+
     # Plot histogram with Poisson uncertainty
-    ax.hist(data, bin_edges, range=range, histtype='step', linewidth=2)
-    h0, _ = np.histogram(data, bin_edges)
-    ax.errorbar(bin_centers, h0, yerr=np.sqrt(h0), fmt='none', color='black')
-    
+    ax.hist(data, bin_edges, range=xrange, histtype='step',
+            linewidth=2, color=color, **kwargs)
+    if do_errorbar:
+        h0, _ = np.histogram(data, bin_edges)
+        ax.errorbar(bin_centers, h0, yerr=np.sqrt(h0), fmt='none', color='black')
+
     # Style & return
     ax.grid(color="grey", linestyle="--", linewidth=1.5, alpha=.5)
     return ax
-    
-def plot_func_hist(f, args, data, bin_edges, ax=None,
-                   logy=False, logx=False, range=None, color=None):
+
+def plot_func_hist(f, args, data, bin_edges, logy=False, logx=False,
+                   xrange=None, color=None, **kwargs):
     """Plot a function through a histogram."""
-    ax = plot_hist(data, bin_edges, ax=ax, logy=logy, logx=logx, range=range)
-    
-    # Plot function
+    # Prepare gridspec
+    fig = plt.figure()
+    gs = GridSpec(4, 1)
+    ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
+
+    # Plot fit results function
+    ax = plot_hist(data, bin_edges, ax=ax, logy=logy, logx=logx, xrange=xrange)
     x = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     bin_width = bin_edges[1:] - bin_edges[:-1]
-    ax.plot(x, f(x, *args) * bin_width, color=color)
-    
-    # TODO: plot residuals
-    return ax
+    ax.plot(x, f(x, *args) * bin_width, color=color, **kwargs)
+
+    # Plot residuals (not for zeros)
+    h0, _ = np.histogram(data, bin_edges)
+    m = h0 > 0
+    _x, _h0, _bin_width = x[m], h0[m], bin_width[m]
+    axRes.errorbar(_x, _h0 - f(_x, *args)*_bin_width, np.sqrt(_h0),
+                   fmt=".", color=color, zorder=1)
+    axRes.axhline(0, linewidth=2., linestyle="--", color="r", zorder=2)
+
+    return ax, axRes

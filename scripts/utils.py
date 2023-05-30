@@ -1,4 +1,32 @@
 import numpy as np
+from scipy.stats import norm
+from scipy.special import erf, owens_t
+
+
+def get_nth_letter(i):
+    """Return the ith letter of the alphabet in lowercase."""
+    if 1 <= i <= 26:
+        return chr(ord('a') + i - 1)
+    return "Invalid input"
+
+
+def read(filename, n_lines=None):
+    """Read LPSD output - return frequencies, PSD."""
+    x, y = [], []
+    with open(filename, 'r') as _file:
+        data = csv.reader(_file, delimiter="\t")
+        for row in tqdm(data, total=n_lines):
+            if not row or row[0].startswith("#"):
+                continue
+            x += [float(row[0])]
+            y += [float(row[1])]
+
+    return x, y
+
+
+def skew_normal_cdf(x, mu=0, sigma=1, alpha=0):
+    z = (x - mu) / sigma
+    return norm.cdf(z) - 2 * owens_t(z, alpha)
 
 
 def f(j, fmin, fmax, Jdes):
@@ -46,8 +74,6 @@ def getChiSquarePoisson(y, h, ddof=3):
     """Get reduced chi square distance between the two arrays by assuming that x follows Poisson."""
     zero = h == 0
     return np.sum(np.power(y[~zero] - h[~zero], 2) / h[~zero]) / (len(h[~zero]) - ddof)
-
-import numpy as np
 
 
 def calc_fwhm_pos(x, y):
