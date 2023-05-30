@@ -667,8 +667,8 @@ void read_from_dataset_stride(struct hdf5_contents *contents, hsize_t *offset,
                                         offset, stride, count, NULL);
     hid_t memspace = H5Screate_simple(data_rank, data_count, NULL);
 
-    status = H5Dread(contents->dataset, H5T_NATIVE_DOUBLE, memspace, contents->dataspace,
-		             H5P_DEFAULT, data_out);
+    status = H5Dread(contents->dataset, H5T_NATIVE_DOUBLE, memspace,
+                     contents->dataspace, H5P_DEFAULT, data_out);
     // Clean up
     H5Sclose(memspace);
     status = H5Sselect_none(contents->dataspace);

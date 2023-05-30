@@ -78,7 +78,7 @@ typedef struct {
 	long int nspec;			/* number of samples in spectrum */
 	long int nfft;			/* FFTW: dimension of FFT */
 	int iter;			/* A reference number to show why step through a parallelised job. Set to zero for a single job run */
-	int Jdes;			/* Provides the total number of required frequencies */
+	unsigned int Jdes;			/* Provides the total number of required frequencies */
 	unsigned short int asknspec;
 	double fsamp;			/* sampling frequency */
 	unsigned short int askfsamp;

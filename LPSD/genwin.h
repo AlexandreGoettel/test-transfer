@@ -14,10 +14,10 @@ void makewinsincos (long int nfft, double bin, double *win, double *winsum,
 void makewinsincos_indexed (long int nfft, double bin, double *win, double *winsum,
 		            double *winsum2, double *nenbw, int, int, bool);
 
-void makewin (long int nfft, double *win,
+void makewin (unsigned int nfft, double *win,
               double *winsum, double *winsum2, double *nenbw);
-void makewin_indexed (long int nfft, int offset, int count, double *win,
-              double *winsum, double *winsum2, double *nenbw,
+void makewin_indexed (unsigned long int nfft, unsigned long int offset, unsigned int count,
+              double *win, double *winsum, double *winsum2, double *nenbw,
               bool reset_sums);
 
 #endif
