@@ -754,7 +754,6 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         // Loop over segments - this is the actual calculation step
         for (i_segment = 0; i_segment < n_segments; i_segment++) {
             int index_shift = 0;
-            printf("n_segments, Nfft, Nj0, nmax: %d, %ld, %ld, %d\n", n_segments, Nfft, Nj0, max_samples_in_memory);
         	fflush (stdout);
             if (Nfft <= max_samples_in_memory) {
                 // Run normal FFT
@@ -774,12 +773,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 hsize_t offset[2] = {0, jfft_min};
                 hsize_t data_rank = 1;
                 hsize_t data_count[1] = {count[1]};
-				printf("Count: %d, Offset: %d, data_count: %d\n", jfft_max-jfft_min, jfft_min, count[1]);
-				fflush (stdout);
                 read_from_dataset(&_contents, offset, count, data_rank, data_count, fft_real);
                 offset[0] = 1;
-				printf("Debug\n");
-				fflush (stdout);
                 read_from_dataset(&_contents, offset, count, data_rank, data_count, fft_imag);
                 index_shift = jfft_min;
             }
