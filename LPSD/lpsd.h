@@ -11,8 +11,8 @@ unsigned long int get_next_power_of_two(unsigned long int);
 void stride_over_array(double*, int, int, int, double*);
 
 // LPSD calculations
-unsigned long int get_N_j(unsigned int, double, double, double, unsigned int);  // TODO: replace with nffts
-double get_f_j(unsigned int, double, double, unsigned int);  // TODO: replace with fspec
+unsigned long int get_N_j(double, double, double, double, double);  // TODO: replace with nffts
+double get_f_j(double, double, double, double);  // TODO: replace with fspec
 void fill_ordered_coefficients(int, int*);
 
 // Main functions

@@ -157,15 +157,16 @@ stride_over_array (double *data, int N, int stride, int offset, double *output)
 // Rounded to nearest integer.
 // TODO: replace with call to nffts?
 unsigned long int
-get_N_j (unsigned int j, double fsamp, double fmin, double fmax, unsigned int Jdes) {
+get_N_j (double j, double fsamp, double fmin, double fmax, double Jdes) {
     double g = log(fmax) - log(fmin);  // TODO: could consider making g part of cfg
+    // This exp turn is in overflow danger
     return round (fsamp/fmin * exp(-j*g / (Jdes - 1.)) / (exp(g / (Jdes - 1.)) - 1.));
 }
 
 // Get the frequency of bin j
 // TODO: replace with call to fspec?
 double
-get_f_j (unsigned int j, double fmin, double fmax, unsigned int Jdes) {
+get_f_j (double j, double fmin, double fmax, double Jdes) {
     double g = log(fmax) - log(fmin);  // TODO: could consider making g part of cfg
     return fmin*exp(j*g / (Jdes - 1.));
 }
@@ -662,7 +663,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         // Nj0: length of segment
         unsigned long int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
         // Block ends at j
-        j = - (cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / (cfg->Jdes - 1.)) - 1.));
+        j = - ((double)cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / ((double)cfg->Jdes - 1.)) - 1.));
         if (j >= cfg->Jdes) j = cfg->Jdes - 1; // TODO: take care of edge case
 
         // Prepare segment loop
@@ -741,7 +742,6 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 hsize_t offset[1] = {memory_unit_index*max_samples_in_memory};
                 hsize_t count[1] = {iteration_samples};
                 write_to_hdf5(window_contents_ptr, window, offset, count, window_rank, count);
-
                 // Book-keeping
                 remaining_samples -= iteration_samples;
                 memory_unit_index++;
@@ -754,8 +754,6 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         // Loop over segments - this is the actual calculation step
         for (i_segment = 0; i_segment < n_segments; i_segment++) {
             int index_shift = 0;
-            printf("n_segments, Nfft, Nj0, nmax: %d, %ld, %ld, %d\n", n_segments, Nfft, Nj0, max_samples_in_memory);
-        	fflush (stdout);
             if (Nfft <= max_samples_in_memory) {
                 // Run normal FFT
                 hsize_t offset[1] = {i_segment*delta_segment};
@@ -774,12 +772,8 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 hsize_t offset[2] = {0, jfft_min};
                 hsize_t data_rank = 1;
                 hsize_t data_count[1] = {count[1]};
-				printf("Count: %d, Offset: %d, data_count: %d\n", jfft_max-jfft_min, jfft_min, count[1]);
-				fflush (stdout);
                 read_from_dataset(&_contents, offset, count, data_rank, data_count, fft_real);
                 offset[0] = 1;
-				printf("Debug\n");
-				fflush (stdout);
                 read_from_dataset(&_contents, offset, count, data_rank, data_count, fft_imag);
                 index_shift = jfft_min;
             }
@@ -856,3 +850,4 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
   else if ((*cfg).METHOD == 1) calculate_fft_approx (cfg, data);
   else gerror("Method not implemented.");
 }
+
