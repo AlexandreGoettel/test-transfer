@@ -1,6 +1,19 @@
+import csv
+from tqdm import tqdm
 import numpy as np
 from scipy.stats import norm
 from scipy.special import erf, owens_t
+
+
+def seq_mean(x, y):
+    """Calculate the mean over a sequence (e.g. hist.)"""
+    return np.sum(x * y) / np.sum(y)
+
+
+def seq_var(x, y):
+    """Calculate the variance over a sequence (e.g. hist.)"""
+    mu = seq_mean(x, y)
+    return np.sum(y*(x - mu)**2) / np.sum(y)
 
 
 def get_nth_letter(i):
@@ -10,18 +23,43 @@ def get_nth_letter(i):
     return "Invalid input"
 
 
-def read(filename, n_lines=None):
-    """Read LPSD output - return frequencies, PSD."""
-    x, y = [], []
-    with open(filename, 'r') as _file:
-        data = csv.reader(_file, delimiter="\t")
-        for row in tqdm(data, total=n_lines):
-            if not row or row[0].startswith("#"):
-                continue
-            x += [float(row[0])]
-            y += [float(row[1])]
+def apply_cfd(data, bins, _cfd):
+    """Apply rising and falling edge constant fraction discriminator."""
+    h0, bins = np.histogram(data, bins)
+    peak_index = np.argmax(h0)
+    rising_idx_col = np.where(h0[:peak_index] >= h0[peak_index] * _cfd)[0]
+    if not list(rising_idx_col):
+        rising_idx = 0
+    else:
+        rising_idx = rising_idx_col[0]
 
-    return x, y
+    falling_idx_col = np.where(h0[peak_index:] < h0[peak_index] * _cfd)[0]
+    if not list(falling_idx_col) or falling_idx_col[0] > len(h0) -2:
+        falling_idx = len(h0) - 2
+    else:
+        falling_idx = falling_idx_col[0] + peak_index
+
+    return np.linspace(bins[rising_idx], bins[falling_idx+1], len(bins))
+
+
+def read(name, dtype=np.float64, n_lines=None, delimiter="\t"):
+    """
+    Read an output file from LPSD.
+
+    name(str): output file name.
+    return: frequency & PSD arrays.
+    """
+    x, y = [], []
+    with open(name, "r") as _file:
+        data = csv.reader(_file, delimiter=delimiter)
+        print("Reading input PSD..")
+        for row in tqdm(data, total=n_lines):
+            try:
+                x += [float(row[0])]
+                y += [float(row[1])]
+            except ValueError:
+                continue
+    return np.array(x, dtype=dtype), np.array(y, dtype=dtype)
 
 
 def skew_normal_cdf(x, mu=0, sigma=1, alpha=0):
