@@ -305,47 +305,47 @@ static void writeData(FILE *ofp, tCFG * cfg, tDATA * data, tGNUTERM * gt) {
 		for (c = 0; c < strlen((*gt).fmt); c++) {
 			switch ((*gt).fmt[c]) {
 			case 'f':
-				fprintf(ofp, "%e	", (*data).fspec[i]);
+				fprintf(ofp, "%.10e\t", (*data).fspec[i]);
 				break;
 			case 'd':
-				fprintf(ofp, "%e	", sqrt((*data).psd[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).psd[i]));
 				break;
 			case 'D':
-				fprintf(ofp, "%e	", (*data).psd[i]);
+				fprintf(ofp, "%.10e\t", (*data).psd[i]);
 				break;
 			case 's':
-				fprintf(ofp, "%e	", sqrt((*data).ps[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).ps[i]));
 				break;
 			case 'S':
-				fprintf(ofp, "%e	", (*data).ps[i]);
+				fprintf(ofp, "%.10e\t", (*data).ps[i]);
 				break;
 			case 'N':
-				fprintf(ofp, "%d	", (*data).avg[i]);
+				fprintf(ofp, "%d\t", (*data).avg[i]);
 				break;
 			case 'u':
-				fprintf(ofp, "%e	", sqrt((*data).varpsd[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).varpsd[i]));
 				break;
 			case 'U':
-				fprintf(ofp, "%e	", (*data).varpsd[i]);
+				fprintf(ofp, "%.10e\t", (*data).varpsd[i]);
 				break;
 			case 'v':
-				fprintf(ofp, "%e	", sqrt((*data).varps[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).varps[i]));
 				break;
 			case 'V':
-				fprintf(ofp, "%e	", (*data).varps[i]);
+				fprintf(ofp, "%.10e\t", (*data).varps[i]);
 				break;
 			case 'R':
-				fprintf(ofp, "%e	",
+				fprintf(ofp, "%.10e\t",
 					(*cfg).fsamp / (double) (*data).nffts[i]);
 				break;
 			case 'b':
-				fprintf(ofp, "%e	", (*data).bins[i]);
+				fprintf(ofp, "%.10e\t", (*data).bins[i]);
 				break;
 			case 'r':
-				fprintf(ofp, "%e        ", (*data).psd_real[i]);
+				fprintf(ofp, "%.10e\t", (*data).psd_real[i]);
 				break;
 			case 'i':
-				fprintf(ofp, "%e        ", (*data).psd_imag[i]);
+				fprintf(ofp, "%.10e\t", (*data).psd_imag[i]);
 				break;
 			default:
 				break;
