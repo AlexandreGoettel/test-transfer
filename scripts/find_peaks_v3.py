@@ -1,6 +1,9 @@
 """Fit background (L)PSD with spline + segment lines."""
 # Standard imports
+import os
+import json
 import numpy as np
+from matplotlib import pyplot as plt
 # Project imports
 from peak_finder import PeakFinder
 import models
@@ -20,9 +23,8 @@ def simple_spline_alt():
 
 def interference_fit_alt():
     """Temporary alternative to semi-combined ultranest fit."""
-    # TODO: add model (file?), popt_segments, pcov_segments
-    return [-91.35561965873303, -97.31748429524563, -101.16588314032273, -101.97933713952926,
-            -105.32623108070874, -107.0547970741264, -128.51671359120186]
+    _data = np.load("out/prelim_fit.npz")
+    return _data["y_knots"], _data["popt_segments"], _data["pcov_segments"]
 
 
 def main():
@@ -56,18 +58,16 @@ def main():
     # 2- Preliminary spline+lines (semi-combined) fit.
     print("Performing preliminary semi-combined fit..")
     block_positions = list(pf.block_position_gen())
-    # y_knots, popt_segments, pcov_segments = pf.interference_fit(
-    #     x_knots, y_knots, y_sigma, sigma,
-    #     block_positions, 1000, verbose=True)\
-    #     if do_prelim_interference_fit else interference_fit_alt()
-    # Save data for later speed up if needed
-    # np.savez("out/prelim_fit.npz",
-    #          y_knots=y_knots,
-    #          popt_segments=popt_segments,
-    #          pcov_segments=pcov_segments)
-    _data = np.load("out/prelim_fit.npz")
-    y_knots, popt_segments, pcov_segments = _data["y_knots"], _data["popt_segments"], _data["pcov_segments"]
-    del _data
+    if do_prelim_interference_fit:
+        y_knots, popt_segments, pcov_segments = pf.interference_fit(
+            x_knots, y_knots, y_sigma, sigma,
+            block_positions, 1000, verbose=True)
+        np.savez("out/prelim_fit.npz",
+            y_knots=y_knots,
+            popt_segments=popt_segments,
+            pcov_segments=pcov_segments)
+    else:
+        y_knots, popt_segments, pcov_segments = interference_fit_alt()
 
     # 3- Fit skew normals across frequency blocks, apply preliminary peak mask
     print("Fit chunks with skew normals..")
@@ -83,37 +83,41 @@ def main():
 
     # 4- Whiten residuals to find peaks
     print("Whiten data and identify peaks..")
-    peak_mask, valid_indices = pf.get_peak_mask_from_residuals(
+    peak_mask, peak_info = pf.get_peak_mask_from_residuals(
         residuals, peak_mask, popt, chis,
         _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH,
         _CUT_ALPHA, verbose=True)
+    prefix = "_".join(os.path.split(kwargs["name"])[-1].split("_")[1:]).split(".", maxsplit=1)[0]
+    np.save(os.path.join("data", f"peak_info_{prefix}.npy"), peak_info)
 
     # 5- Combined fit on cleaned data
-    fit_mask = peak_mask.copy()
-    fit_mask[:valid_indices[0]] = True
-    fit_mask[valid_indices[1]:] = True
-    pf.combined_fit(fit_mask, block_positions, x_knots, y_knots, y_sigma,
-                    popt_segments, pcov_segments, pruning=1000)
+    pruning = 1000
+    pf.combined_fit(peak_mask, block_positions, x_knots, y_knots, y_sigma,
+                    popt_segments, pcov_segments, pruning=pruning)
 
     # 6- Plot results from full combined fit
-    # pruning = 1000
-    # X, Y = np.log(pf.freq[~peak_mask][::pruning]), np.log(pf.psd[~peak_mask][::pruning])
-    # block_positions = pf.adjust_block_positions(block_positions, ~peak_mask)
-    # block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
-    # test = np.concatenate([y_knots, popt_segments.flatten()])
+    X, Y = np.log(pf.freq[~peak_mask][::pruning]), np.log(pf.psd[~peak_mask][::pruning])
+    block_positions = pf.adjust_block_positions(block_positions, ~peak_mask)
+    block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
+    test = np.concatenate([y_knots, popt_segments.flatten()])
+    print(models.likelihood_combined(test, X, Y, x_knots, block_positions))
 
-    # splines = models.model_spline(test, x_knots, shift=0)(X)
-    # cube = np.zeros((4, test.shape[0]))
-    # for i in range(cube.shape[0]):
-    #     cube[i, :] = test
-    # splines_vec = models.model_spline_vec(cube, x_knots, shift=0)
-    # splines_vec = splines_vec[3](X)
+    with open("out_test/info/results.json") as _f:
+        results = json.load(_f)
+    bf = np.array(results["maximum_likelihood"]["point"])
 
-    # print(splines.shape, splines_vec.shape)
-    # print(np.mean(splines), np.mean(splines_vec))
+    model_before = models.model_combined(test, X, block_positions, x_knots)
+    model_after = models.model_combined(bf, X, block_positions, x_knots)
 
-    # print(models.likelihood_combined(test, X, Y, x_knots, block_positions))
-    # print(models.likelihood_combined_vec(test[None, ...], X, Y, x_knots, block_positions))
+    plt.figure()
+    ax = plt.subplot(111)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.plot(np.exp(X), np.exp(Y))
+    ax.plot(np.exp(X), np.exp(model_before), label="Interference fit")
+    ax.plot(np.exp(X), np.exp(model_after), label="Combined fit")
+    ax.legend(loc="upper right")
+    plt.show()
 
 
 if __name__ == '__main__':

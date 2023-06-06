@@ -260,6 +260,22 @@ class PeakFinder:
 
         return popt, pcov, chis
 
+    def get_peak_info(self, data, mask):
+        """Return the start position, width, and max height of peaks where values exceed a cut."""
+        # Find the starting and ending points of the peaks
+        extended_mask = np.concatenate(([False], mask, [False]))
+        change_points = np.diff(extended_mask.astype(int))
+
+        # find the starting and ending indices of each peak
+        peak_starts = np.where(change_points == 1)[0]
+        peak_ends = np.where(change_points == -1)[0]
+        assert peak_starts.size == peak_ends.size
+
+        # Calculate the widths and heights of the peaks
+        widths = peak_ends - peak_starts
+        max_heights = [data[start:end].max() for start, end in zip(peak_starts, peak_ends)]
+        return np.stack((peak_starts, widths, max_heights), axis=-1)
+
     def get_peak_mask_from_residuals(self, residuals, peak_mask, popt, chis,
                                      segment_size=1000, chi_lo=.1, chi_hi=2,
                                      cut_alpha=0.99, pruning=100, verbose=False):
@@ -274,47 +290,65 @@ class PeakFinder:
                 np.arange(chis.shape[0])[goodFit],
                 popt[:, i+1][goodFit]
                 )]
+
+        # ATMPTMPTMPTMTTP
+        # Perform whitening on full valid data to get peak info
+        # even for pre-processed peaks
+        # So 1- get chunk_limits from "pre-filtered"
+        # 2- translate back through peak_mask before applying
+
         # Whitening step - must replicate the looping from the fit
         plot_x, plot_y = [], []
         _residuals, _freq = residuals[~peak_mask], self.freq[~peak_mask]
-        whitened_data = np.zeros_like(_freq)
+        whitened_data = np.zeros_like(residuals)
         chunk_limits = list(self.get_chunk_lims(len(_residuals), segment_size))
+
+        # Add variables to track chunks in original residuals data
+        peak_cumsum = np.cumsum(~peak_mask) - 1
+        N, _count, _previous = len(residuals), 0, 0
         for i, (start, end) in enumerate(tqdm(chunk_limits[firstValid:lastValid+1])):
+            # Loop condition
+            n_loop = end - start
+            while _count < N and peak_cumsum[_count] < start + n_loop:
+                _count += 1
+            _start = _previous
+            _end, _previous = _count, _count
+
+            # Whiten full data using _start and _end mapping
             mu, sigma, alpha = list(map(lambda f: f(i), interp_funcs))
-            whitened_data[start:end] = norm.ppf(
-                utils.skew_normal_cdf(_residuals[start:end], mu=mu, sigma=sigma, alpha=alpha)
+            whitened_data[_start:_end] = norm.ppf(
+                utils.skew_normal_cdf(residuals[_start:_end], mu=mu, sigma=sigma, alpha=alpha)
             )
             # Prepare plot
-            plot_x.extend(_freq[start:end])
-            plot_y.extend(whitened_data[start:end])
+            plot_x.extend(self.freq[_start:_end])
+            plot_y.extend(whitened_data[_start:_end])
 
-        # Update peak mask using whitened data
+        # Get positive peak information for later DM searches.
         cut_value = -norm.ppf((1. - cut_alpha) / 2.)
-        peak_mask_2 = (whitened_data < -cut_value) ^ (whitened_data > cut_value)
+        peak_info = self.get_peak_info(whitened_data, whitened_data >= cut_value)
 
-        # Combine peak masks and re-fit cleaned data
-        combined_peak_mask = peak_mask.copy()
-        combined_peak_mask[~peak_mask] = peak_mask_2
+        # Create second mask to mask all deviations and invalid values
+        _full_mask = (peak_mask == 1) ^ (whitened_data < -cut_value)
+        _full_mask[~peak_mask] = whitened_data[~peak_mask] >= cut_value
+
         # Remove start and end bad fit chunk
-        # combined_peak_mask[:chunk_limits[firstValid][0]] = True
-        # combined_peak_mask[chunk_limits[lastValid][1]:] = True
+        _full_mask[:chunk_limits[firstValid][0]] = True
+        _full_mask[chunk_limits[lastValid][1]:] = True
         if not verbose:
-            return combined_peak_mask, (chunk_limits[firstValid][0],
-                                        chunk_limits[lastValid][1])
+            return _full_mask, peak_info
 
         plt.figure()
         ax = plt.subplot(111)
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.plot(self.freq[::pruning], self.psd[::pruning], label="Original")
-        ax.plot(self.freq[~combined_peak_mask][::pruning],
-                self.psd[~combined_peak_mask][::pruning], label="Non-peak")
+        ax.plot(self.freq[~_full_mask][::pruning],
+                self.psd[~_full_mask][::pruning], label="Non-peak")
         ax.legend(loc="upper right")
         ax.set_xlabel("Frequency (Hz)")
         ax.set_ylabel("PSD")
         plt.show()
-        return combined_peak_mask, (chunk_limits[firstValid][0],
-                                    chunk_limits[lastValid][1])
+        return _full_mask, peak_info
 
     def combined_fit(self, peak_mask, block_positions,
                      x_knots, y_knots, y_sigma,
@@ -358,12 +392,4 @@ class PeakFinder:
         sampler.print_results()
         bf = results["maximum_likelihood"]["point"]
         print("BEST FIT:", bf)
-
-        # Extract mu, sigma
-        x = np.array([sample['parameters']['x'] for sample in results["samples"]])
-        w = np.array(results["weights"])
-        mu = utils.seq_mean(x, w)
-        sigma = np.sqrt(utils.seq_var(x, w))
-        print(mu)
-        print(sigma)
         return bf
