@@ -42,7 +42,8 @@ def apply_cfd(data, bins, _cfd):
     return np.linspace(bins[rising_idx], bins[falling_idx+1], len(bins))
 
 
-def read(name, dtype=np.float64, n_lines=None, delimiter="\t"):
+def read(name, dtype=np.float64, n_lines=None,
+         delimiter="\t", raw_freq=True):
     """
     Read an output file from LPSD.
 
@@ -55,9 +56,10 @@ def read(name, dtype=np.float64, n_lines=None, delimiter="\t"):
         print("Reading input PSD..")
         for row in tqdm(data, total=n_lines):
             try:
-                x += [float(row[0])]
+                if raw_freq:
+                    x += [float(row[0])]
                 y += [float(row[1])]
-            except ValueError:
+            except (ValueError, IndexError):
                 continue
     return np.array(x, dtype=dtype), np.array(y, dtype=dtype)
 

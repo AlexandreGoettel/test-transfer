@@ -39,7 +39,9 @@ class PeakFinder:
         self.g = np.log(self.fmax) - np.log(self.fmin)
 
         # Read data
-        self.freq, self.psd = utils.read(self.name, n_lines=self.J)
+        _, self.psd = utils.read(self.name, n_lines=self.J, raw_freq=False)
+        self.freq = self.fmin * np.exp(np.arange(self.J) * self.g / float(self.J - 1)) *\
+            (np.exp(self.g / float(self.J - 1)) - 1)
 
     def block_position_gen(self):
         """Generator for block positions."""

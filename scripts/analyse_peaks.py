@@ -8,12 +8,24 @@ from peak_finder import PeakFinder
 
 
 def main():
+    # Set analysis variables
     epsilon = 10
     t0, t1 = 1243393026, 1243509654
     ifo = "H1"
+    fmin = 10  # Hz
+    fmax = 8192  # Hz
+    resolution = 1e-6
 
+    # Set derivative variables
+    g = np.log(fmax) - np.log(fmin)
+    J = utils.Jdes(fmin, fmax, resolution)
+
+    # Get data
     suffix = f"epsilon{epsilon}_{t0}_{t1}_{ifo}"
-    freq, psd = utils.read(os.path.join("data", f"result_{suffix}.txt"))
+    _, psd = utils.read(os.path.join("data", f"result_{suffix}.txt"),
+                        raw_freq=False)
+    freq = fmin * np.exp(np.arange(J) * g / float(J - 1)) *\
+        (np.exp(g / float(J - 1)) - 1)
     peak_info = np.load(os.path.join("data", f"peak_info_{suffix}.npy"))
     # data = (freq[1:] - freq[:-1]) / freq[:-1]
     # bins = np.logspace(np.log10(min(data)), np.log10(max(data)), 1000)
