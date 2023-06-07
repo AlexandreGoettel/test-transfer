@@ -843,6 +843,14 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 void
 calculateSpectrum (tCFG * cfg, tDATA * data)
 {
+  // Before running the analysis, check if the output file can be opened.
+  FILE *ofp = fopen((*cfg).ofn, "w");
+  if (ofp == NULL)
+    gerror1("Error opening output file.. Aborting.", (*cfg).ofn);
+  fclose(ofp);
+  ofp = NULL;
+
+  // Run the analysis
   nread = floor (((*cfg).tmax - (*cfg).tmin) * (*cfg).fsamp + 1);
 
   calc_params (cfg, data);

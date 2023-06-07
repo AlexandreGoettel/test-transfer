@@ -426,7 +426,7 @@ void writeOutputFile(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int 
 
 	ofp = fopen((*cfg).ofn, "w");
 	if (0 == ofp)
-		gerror1("Error opening", (*cfg).ofn);
+		gerror1("Error opening output file.. Aborting.", (*cfg).ofn);
 
 	writeComment(&cmt[0], cfg, wi, gt, data, argc, argv);
 	fprintf(ofp,"%s",cmt);
