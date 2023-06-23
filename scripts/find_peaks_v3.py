@@ -1,7 +1,6 @@
 """Fit background (L)PSD with spline + segment lines."""
 # Standard imports
 import os
-import json
 import numpy as np
 from matplotlib import pyplot as plt
 # Project imports
@@ -31,7 +30,7 @@ def main():
     """Run full-chain analysis on LPSD data segment."""
     # Set analysis constraints
     do_prelim_spline_fit = False
-    do_prelim_interference_fit = True
+    do_prelim_interference_fit = False
 
     # Temporary analysis-wide constants
     LOWER_LIM, UPPER_LIM = -5, 3  # Prelim cut
@@ -91,32 +90,70 @@ def main():
     np.save(os.path.join("data", f"peak_info_{prefix}.npy"), peak_info)
 
     # 5- Combined fit on cleaned data
-    pruning = 1000
-    pf.combined_fit(peak_mask, block_positions, x_knots, y_knots, y_sigma,
-                    popt_segments, pcov_segments, pruning=pruning)
+    pruning = 10000
+    # pf.combined_fit(peak_mask, block_positions, x_knots, y_knots, y_sigma,
+    #                 popt_segments, pcov_segments, pruning=pruning)
+    initial_guess = np.concatenate([y_knots, popt_segments.flatten()])
+    bf = pf.combined_fit_minimize(peak_mask, block_positions, pruning,
+                                  x_knots, initial_guess)
 
-    # 6- Plot results from full combined fit
-    X, Y = np.log(pf.freq[~peak_mask][::pruning]), np.log(pf.psd[~peak_mask][::pruning])
-    block_positions = pf.adjust_block_positions(block_positions, ~peak_mask)
-    block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
-    test = np.concatenate([y_knots, popt_segments.flatten()])
-    print(models.likelihood_combined(test, X, Y, x_knots, block_positions))
+    ####################
+    # Second iteration # starting data has peak_mask applied
+    ####################
+    # TODO: incorporate loop
+    # 2.3 Fit skew normals along residuals
+    Y, X = np.log(pf.psd), np.log(pf.freq)
+    # _block_positions = pf.adjust_block_positions(block_positions, ~peak_mask)
+    residuals = np.log(pf.psd) - models.model_combined(
+        bf, X, block_positions, x_knots)
+    popt, _, chis = pf.fit_frequency_blocks(
+        residuals[~peak_mask],
+        _CFD_ALPHA, _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH)
 
-    with open("out_test/info/results.json") as _f:
-        results = json.load(_f)
-    bf = np.array(results["maximum_likelihood"]["point"])
+    # 2.4 Whiten data and find peaks
+    peak_mask, peak_info = pf.get_peak_mask_from_residuals(
+        residuals, peak_mask, popt, chis,
+        _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH,
+        _CUT_ALPHA, verbose=True)
+    prefix = "_".join(os.path.split(kwargs["name"])[-1].split("_")[1:]).split(".", maxsplit=1)[0]
+    np.save(os.path.join("data", f"peak_info_{prefix}.npy"), peak_info)
 
-    model_before = models.model_combined(test, X, block_positions, x_knots)
-    model_after = models.model_combined(bf, X, block_positions, x_knots)
+    # 2.5 Combined fit
+    initial_guess = bf
+    pruning = 10000
+    bf = pf.combined_fit_minimize(peak_mask, block_positions, pruning,
+                                  x_knots, initial_guess)
+    print(bf)
 
+    # PLOT RESULTS - TMP
+    _X, _Y = np.log(pf.freq[~peak_mask][::pruning]), np.log(pf.psd[~peak_mask][::pruning])
+    _block_positions = pf.adjust_block_positions(block_positions, ~peak_mask)
+    _block_positions = np.array([pos / pruning for pos in _block_positions], dtype=int)
+
+    print(models.likelihood_combined(initial_guess, _X, _Y, x_knots, _block_positions))
+    print(models.likelihood_combined(bf, _X, _Y, x_knots, _block_positions))
+    model_before = models.model_combined(
+        initial_guess, X, block_positions, x_knots)
+    model_after = models.model_combined_vec(
+        bf[None, :], X, block_positions, x_knots)[0, :]
+
+    # Plot effect of second iteration on bkg fit
     plt.figure()
     ax = plt.subplot(111)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.plot(np.exp(X), np.exp(Y))
-    ax.plot(np.exp(X), np.exp(model_before), label="Interference fit")
-    ax.plot(np.exp(X), np.exp(model_after), label="Combined fit")
+    ax.plot(np.exp(X[~peak_mask]), np.exp(Y[~peak_mask]))
+    ax.plot(np.exp(X), np.exp(model_before), label="First iteration")
+    ax.plot(np.exp(X), np.exp(model_after), label="Second iteration")
     ax.legend(loc="upper right")
+
+    # Plot cleaned data with residual spline component
+    plt.figure()
+    ax = plt.subplot(111)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.plot(np.exp(X), np.exp(Y - models.model_segment_line(
+        bf, X, block_positions, shift=len(x_knots))))
     plt.show()
 
 

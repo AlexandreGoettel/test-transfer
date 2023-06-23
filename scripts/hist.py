@@ -117,7 +117,7 @@ def plot_hist(data, bin_edges, ax=None, xrange=None, do_errorbar=False,
     return ax
 
 def plot_func_hist(f, args, data, bin_edges, logy=False, logx=False,
-                   xrange=None, color=None, **kwargs):
+                   xrange=None, color=None, density=False, **kwargs):
     """Plot a function through a histogram."""
     # Prepare gridspec
     fig = plt.figure()
@@ -125,7 +125,8 @@ def plot_func_hist(f, args, data, bin_edges, logy=False, logx=False,
     ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
 
     # Plot fit results function
-    ax = plot_hist(data, bin_edges, ax=ax, logy=logy, logx=logx, xrange=xrange)
+    ax = plot_hist(data, bin_edges, ax=ax, logy=logy, logx=logx,
+                   xrange=xrange, density=density)
     x = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     bin_width = bin_edges[1:] - bin_edges[:-1]
     ax.plot(x, f(x, *args) * bin_width, color=color, **kwargs)

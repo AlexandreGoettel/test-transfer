@@ -138,7 +138,8 @@ def likelihood_combined_vec(cube, x, y_data, x_knots, block_positions):
     return lkl
 
 
-def prior_combined(cube, y_knots, y_sigma, popt_segments, pcov_segments):
+def prior_combined(cube, y_knots, y_sigma, popt_segments, pcov_segments,
+                   n_sigma=1):
     """
     Implement priors for combined fit based on previous fits.
     
@@ -147,7 +148,6 @@ def prior_combined(cube, y_knots, y_sigma, popt_segments, pcov_segments):
     """
     # Priors on spline params
     param = cube.copy()
-    n_sigma = 1
     for i, (k, sigma) in enumerate(zip(y_knots, y_sigma)):
         # Uniform prior:
         lo, hi = k - n_sigma*sigma, k + n_sigma*sigma

@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit
+from scipy.optimize import minimize
 from scipy.interpolate import interp1d
 from scipy.stats import norm
 # Samplers
@@ -40,8 +41,9 @@ class PeakFinder:
 
         # Read data
         _, self.psd = utils.read(self.name, n_lines=self.J, raw_freq=False)
-        self.freq = self.fmin * np.exp(np.arange(self.J) * self.g / float(self.J - 1)) *\
+        bin_width = self.fmin * np.exp(np.arange(self.J) * self.g / float(self.J - 1)) *\
             (np.exp(self.g / float(self.J - 1)) - 1)
+        self.freq = self.fmin + np.cumsum(bin_width) - bin_width[0]
 
     def block_position_gen(self):
         """Generator for block positions."""
@@ -80,7 +82,6 @@ class PeakFinder:
             end_pos = block_positions[i + 1]
             x_segment, y_segment = x[start_pos:end_pos], y[start_pos:end_pos]
             y_model = models.model_spline(y_knots, x_knots, shift=0)(x_segment)
-
             # Fit line
             a, b = np.polyfit(x_segment, y_segment - y_model, deg=1)
             popt[i, :], pcov[i, ...] = curve_fit(
@@ -219,8 +220,12 @@ class PeakFinder:
             (bins[1] - bins[0]))
 
         # Perform fit
-        popt, pcov, chi = hist.fit_hist(hist.skew_gaus, data, bins,
-                                        p0=p0, get_chi_sqr=True)
+        try:
+            popt, pcov, chi = hist.fit_hist(hist.skew_gaus, data, bins,
+                                            p0=p0, get_chi_sqr=True)
+        except RuntimeError:
+            return np.zeros_like(p0), np.zeros((len(p0), len(p0))), np.inf
+
         if verbose:
             plt.figure()
             ax, axRes = hist.plot_func_hist(hist.skew_gaus, popt, data, bins,
@@ -305,6 +310,9 @@ class PeakFinder:
         whitened_data = np.zeros_like(residuals)
         chunk_limits = list(self.get_chunk_lims(len(_residuals), segment_size))
 
+        # TMP - to create good sens data
+        np.savez("fit_results_skew.npz", idx=chunk_limits[firstValid:lastValid+1], interp=interp_funcs)
+
         # Add variables to track chunks in original residuals data
         peak_cumsum = np.cumsum(~peak_mask) - 1
         N, _count, _previous = len(residuals), 0, 0
@@ -360,13 +368,6 @@ class PeakFinder:
         block_positions = self.adjust_block_positions(block_positions, ~peak_mask)
         block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
 
-        # def likelihood(cube, *_):
-        #     return models.likelihood_combined(cube, X, Y, x_knots, block_positions)
-
-        # def prior(cube, *_):
-        #     return models.prior_combined(cube, y_knots, y_sigma,
-        #                                  popt_segments, pcov_segments)
-
         def likelihood(cube, *_):
             return models.likelihood_combined_vec(cube, X, Y, x_knots, block_positions)
 
@@ -384,14 +385,30 @@ class PeakFinder:
         # Run UltraNest
         sampler = ultranest.ReactiveNestedSampler(
             parameters, likelihood, prior,
-            log_dir="out_para/", resume="overwrite", vectorized=True
+            log_dir="out_para/run2/", resume="resume",
+            vectorized=True, ndraw_min=512
         )
         sampler.stepsampler = ultranest.stepsampler.SliceSampler(
             nsteps=2*len(parameters),
             generate_direction=ultranest.stepsampler.generate_mixture_random_direction
         )
-        results = sampler.run(viz_callback=False)
+        results = sampler.run(viz_callback=False, frac_remain=1e-5,
+                              min_num_live_points=2048)
         sampler.print_results()
         bf = results["maximum_likelihood"]["point"]
         print("BEST FIT:", bf)
         return bf
+
+    def combined_fit_minimize(self, peak_mask, block_positions, pruning,
+                              x_knots, initial_guess):
+        """Maximise full combined likelihood."""
+        def likelihood(cube):
+            return -models.likelihood_combined(cube, X, Y, x_knots, block_positions)
+
+        X, Y = np.log(self.freq[~peak_mask][::pruning]), np.log(self.psd[~peak_mask][::pruning])
+        block_positions = self.adjust_block_positions(block_positions, ~peak_mask)
+        block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
+
+        result = minimize(likelihood, initial_guess, method="BFGS", bounds=None)
+        return result.x
+        
