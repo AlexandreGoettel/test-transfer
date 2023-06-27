@@ -6,6 +6,7 @@ Compare MC-based method with approximations.
 import warnings
 from tqdm import trange, tqdm
 import numpy as np
+import pandas as pd
 from multiprocessing import Pool
 from matplotlib import pyplot as plt
 from scipy.interpolate import CubicSpline
@@ -22,6 +23,25 @@ import hist
 
 # FIXME: TMP
 # warnings.filterwarnings("ignore")
+
+
+def numerical_derivative(f, x, h=1e-5):
+    return (f(x + h) - f(x - h)) / (2 * h)
+
+
+def gradient_descent(f, x0, learning_rate, max_iterations, threshold, bounds):
+    x = x0
+
+    for i in range(max_iterations):
+        gradient = numerical_derivative(f, x)
+
+        x = x - learning_rate * gradient
+        x = max(min(x, bounds[1]), bounds[0])
+
+        if abs(gradient) < threshold:
+            break
+
+    return x
 
 
 def get_efficiency_var(k, M):
@@ -127,7 +147,7 @@ def run_simple_spline_fit(X, Y, x_knots, verbose=False, nlive=64):
 
     # ii) Refine estimate with minimize, then pass that result to prior
     bounds = [(0, 10), (.1, 10)] + [(min(Y), max(Y)) for i in x_knots]
-    popt = minimize(lambda x: -_likelihood(x), initial_guess, method="L-BFGS-B",
+    popt = minimize(lambda x: -_likelihood(x), initial_guess, method="Powell",
                     bounds=bounds, options={"ftol": 1e-4})
     initial_guess = popt.x
 
@@ -234,7 +254,6 @@ def simultaneous_q_mu(mu_h, cube, idx_peak, x_data, x_knots,
     x_pruned, y_pruned = x_data[::pruning], y_data[::pruning]
 
     # Optimize over hunk
-    # TODO! !!! IDEA: OPTIMIZE THETA OVER PRUNED DATASET; THEN CALCULATE L OVER FULL DATA ONLY ONCE
     bounds = [(None, None), (0.01, 10)] + [(min(y_data), max(y_data)) for x in x_knots]
     def _lkl_0(params):
         _params = np.concatenate([[0], params])
@@ -244,20 +263,21 @@ def simultaneous_q_mu(mu_h, cube, idx_peak, x_data, x_knots,
                               scale=np.sqrt(_params[2]))
         # Protect against inf
         lkl_inf = np.isinf(lkl)
-        if np.sum(np.array(lkl_inf, dtype=int)):
+        n_inf = np.sum(np.array(lkl_inf), dtype=int)
+        if n_inf == len(lkl):
+            return -1e4 * len(lkl)  # empirical
+        if n_inf:
             lkl[lkl_inf] = np.min(lkl[~lkl_inf])
         return np.sum(lkl)
 
     popt_hunk = minimize(lambda x: -_lkl_0(x),
-                         cube[1:], method="L-BFGS-B", bounds=bounds, tol=tol)
+                         cube[1:], method="L-BFGS-B", bounds=bounds,
+                         options={"ftol": tol})
     y_hunk = model(np.concatenate([[0], popt_hunk.x]),
                    0, x_data, x_knots, shift=shift)
     lkl_hunk = np.sum(skewnorm.logpdf(y_data - y_hunk,
                                       popt_hunk.x[0],
                                       scale=np.sqrt(popt_hunk.x[1])))
-
-    # print(popt_hunk)
-    # print(lkl_hunk)
 
     # Now optimize over just the peak, for mu=mu and mu=0
     popt_peak_zero = minimize(lambda x: -skewnorm.logpdf(
@@ -305,7 +325,8 @@ def get_q_mu(mu_h, mu_d, cube, idx_peak, x_data, x_knots, shift=3, tol=1e-11):
     # Get L(mu_hat, theta_hat)
     bounds = [(None, None), (-10, 10), (0.1, 10)] + [(min(y_sim), max(y_sim)) for x in x_knots]
     popt = minimize(lambda x: -likelihood(x, idx_peak, x_data, y_sim, x_knots, shift=shift),
-                    cube, method="L-BFGS-B", bounds=bounds, tol=tol)
+                    cube, method="L-BFGS-B", bounds=bounds,
+                    options={"ftol": tol})
     mu_hat = popt.x[0]
     if mu_hat > mu_h:
         return 0
@@ -317,8 +338,9 @@ def get_q_mu(mu_h, mu_d, cube, idx_peak, x_data, x_knots, shift=3, tol=1e-11):
         params = np.concatenate([[mu_h], _params])
         return -likelihood(params, idx_peak, x_data, y_sim, x_knots, shift=shift)
 
-    popt = minimize(_likelihood, popt.x[1:], method="L-BFGS-B",
-                    bounds=bounds[1:], tol=tol)
+    popt = minimize(_likelihood, popt.x[1:], method="Powell",
+                    bounds=bounds[1:],
+                    options={"ftol": tol})
     L_mu_theta_hat_hat = -_likelihood(popt.x)
 
     # Return q_mu
@@ -347,19 +369,20 @@ def likelihood(cube, idx_peak, x_data, y_data, x_knots, shift=3):
         lkl[lkl_inf] = np.min(lkl[~lkl_inf])
     return np.sum(lkl)
 
+
+def second_derivative(alpha, sigma, Lambda, theta, verbose=False):
+    """Calculate the second derivative the skew normal of (y-cubic(x)-theta)/sigma w.r.t. theta."""
+    term1 = -2 * alpha**2 / (np.exp(alpha**2 * (Lambda - theta)**2 / sigma**2) * np.pi * sigma**2 * erfc(-alpha * (Lambda - theta) / (np.sqrt(2) * sigma))**2)
+    term2 = -alpha**3 * np.sqrt(2 / np.pi) * (Lambda - theta) / (np.exp(alpha**2 * (Lambda - theta)**2 / (2 * sigma**2)) * sigma**3 * erfc(-alpha * (Lambda - theta) / (np.sqrt(2) * sigma)))
+    if verbose:
+        print("Terms: ", term1, term2, -sigma**2)
+    return term1 + term2 - sigma**-2
+
+
 def get_upper_limits(X, Y, idx_peak):
     """Use Cowan formulae and MC methods to get upper limits."""
     def get_mu_upper_quick(cube, idx_peak, x_data, x_knots,
                            y_data, shift=3, tol=1e-10):
-        def second_derivative(alpha, sigma, Lambda, theta, verbose=False):
-            term1 = -2 * alpha**2 / (np.exp(alpha**2 * (Lambda - theta)**2 / sigma**2) * np.pi * sigma**2 * erfc(-alpha * (Lambda - theta) / (np.sqrt(2) * sigma))**2)
-            term2 = -alpha**3 * np.sqrt(2 / np.pi) * (Lambda - theta) / (np.exp(alpha**2 * (Lambda - theta)**2 / (2 * sigma**2)) * sigma**3 * erfc(-alpha * (Lambda - theta) / (np.sqrt(2) * sigma)))
-            # if np.isnan(term1) or np.isnan(term2):
-            #     return -sigma**2
-            if verbose:
-                print("Terms: ", term1, term2, -sigma**2)
-            return term1 + term2 - sigma**-2
-
         # 2. Calculate using dlnL/dmu from data
         bounds = [(None, None), (-10, 10), (-10, 10)] +\
                 [(min(y_data), max(y_data)) for x in x_knots]
@@ -367,8 +390,7 @@ def get_upper_limits(X, Y, idx_peak):
                         np.concatenate([[0], cube]),
                         method="L-BFGS-B",
                         bounds=bounds,
-                        tol=tol)
-                        # options={"ftol": tol, "gtol": tol})
+                        options={"ftol": tol, "gtol": tol})
         # TODO: see if using q_mu_tilda makes a difference?
         # Build spline to get Lambda
         y_knots = popt.x[shift:len(x_knots)+shift]
@@ -399,7 +421,7 @@ def get_upper_limits(X, Y, idx_peak):
     bounds = [(-10, 10), (.001, 10)] + [(min(Y), max(Y)) for x in x_knots]
     initial_guess = np.concatenate([[0, 0.3], y_knots])
     popt = minimize(_likelihood_no_peak, initial_guess,
-                    method="L-BFGS-B", options={"ftol": 1e-8}, bounds=bounds)
+                    method="Powell", options={"ftol": 1e-8}, bounds=bounds)
     best_fit = popt.x  # Does not contain mu
 
     # 1) Use Likelihood approx to get mu_upper without MC
@@ -409,7 +431,7 @@ def get_upper_limits(X, Y, idx_peak):
     # 2) Now get answer through full MC calculation
     # TODO: also try this one with q_mu_tilda?
     # 2.0) Initialiase analysis variables
-    M = 3000
+    M = 2000
     alpha = 0.05  # 95% C.L.
     threshold, max_iterations = 0.01, 100
 
@@ -433,6 +455,8 @@ def get_upper_limits(X, Y, idx_peak):
             f_q_mu_0 = np.array([x[0] for x in results])
             f_q_mu_mu = np.array([x[1] for x in results])
 
+        f_q_mu_0 = f_q_mu_0[~np.isnan(f_q_mu_0)]
+        f_q_mu_mu = f_q_mu_mu[~np.isnan(f_q_mu_mu)]
         if verbose:
             bins = np.linspace(min(f_q_mu_mu), max(f_q_mu_0), 100)
             ax = hist.plot_hist(f_q_mu_0, bins, logy=True, color="C0",
@@ -447,9 +471,10 @@ def get_upper_limits(X, Y, idx_peak):
             n = np.sum(np.array([f_q_mu_mu > np.median(f_q_mu_0)], dtype=int))
             print("p-values ingredients:", n, M)
             # Calculate median analytically
-            _med = minimize(lambda x: np.abs(quad(lambda t: asymptotic(t, mu, 0, sigma), 0, x)[0]
-                                             - 0.5),
-                            1.5, bounds=[(1e-10, None)], method="L-BFGS-B", tol=1e-2).x
+            _med = minimize(lambda x: (quad(lambda t: asymptotic(t, mu, 0, sigma), 0, x)[0]
+                                       - 0.5)**2,
+                            1.5, bounds=[(1e-10, None)], method="Powell",
+                            options={"ftol": 1e-2}).x
             ax.axvline(_med, color="C0", label="median", linestyle="--")
             plt.show()
         # Compute and return the p-value
@@ -467,7 +492,7 @@ def get_upper_limits(X, Y, idx_peak):
         term2 = 0.5*(mu**2 + sigma**2) / sigma**2 * (1 + erf(mu / (np.sqrt(2)*sigma)))
         return a*erfc(np.sqrt((term1 + term2) / 2.))
 
-    mus = [3, 2, 1]
+    mus = [3, 2, .1]
     ps = [get_p_value(x, M) for x in mus]
     # ps = [(0.0, 0.0009970084765641995), (0.0, 0.0009970084765641995), (0.01, 0.0032901445728277137)]
     print(f"SIGMA: {sigma:.2f}")
@@ -477,9 +502,11 @@ def get_upper_limits(X, Y, idx_peak):
         # Fit to guess new mu
         def _lkl(sigma, a):
             residuals = np.array([x[0] for x in ps]) - fit_p_value(np.array(mus), sigma, a)
-            return np.sum(norm.logpdf(residuals))
+            return np.sum(norm.logpdf(residuals, scale=np.array([x[1] for x in ps])))
         popt = minimize(lambda x: -_lkl(*x), np.array([.43, 1]),
-                        tol=1e-10, bounds=[(0, None), (0, None)])
+                        method="Powell",
+                        bounds=[(0, None), (0, None)],
+                        options={"ftol": 1e-10})
         print(popt)
         plt.figure()
         plt.errorbar(mus,
@@ -493,10 +520,20 @@ def get_upper_limits(X, Y, idx_peak):
         plt.show()
 
         # Now that data is fit well, use popt to estimate mu that will give alpha
-        min_popt = minimize(lambda x: np.abs(np.log(fit_p_value(x, *popt.x)) - np.log(alpha)),
-                            mus[-1], tol=1e-10)
+        min_popt = minimize(lambda x: (fit_p_value(x, *popt.x) - alpha)**2,
+                            1, bounds=[(0, None)], method="Powell",
+                            options={"ftol": 1e-10})
+        # min_popt = gradient_descent(lambda x: np.abs(fit_p_value(x, *popt.x) - alpha), x0, learning_rate, max_iterations, threshold, bounds
         print(min_popt)
         mus += [min_popt.x[0]]
+        if mus[-1] <= 0:
+            M *= 2
+            mus = list(np.delete(mus, -1))
+            # Replace lowest p-value with updated one
+            lowest_mu_idx = np.argmin(mus)
+            tqdm.write("Fit supports negative mu, re-do lowest point")
+            ps[lowest_mu_idx] = get_p_value(mus[lowest_mu_idx], M, verbose=True)
+            continue
         ps += [get_p_value(mus[-1], M, verbose=True)]
         tqdm.write(f"mu_guess: {mus[-1]:.1e}, p_new: {ps[-1][0]:.2} +- {ps[-1][1]:.1e}")
 
@@ -508,26 +545,26 @@ def get_upper_limits(X, Y, idx_peak):
         print("Did not converge to a solution.")
     mu_MC = mus[-1]
 
-    f_q_mu_0, f_q_mu_mu = get_p_value(mu_MC, 3000, 11, False)
-    # 4) Plot hists with formulae for confirmation
-    bins = np.linspace(0, max(f_q_mu_0), 100)
-    ax = hist.plot_hist(f_q_mu_0, bins, logy=True, label=r"$f(q_{\mu}|0)$", density=True)
-    ax = hist.plot_hist(f_q_mu_mu, bins, ax=ax, color="C1", label=r"$f(q_{\mu}|\mu)$", density=True)
+    # f_q_mu_0, f_q_mu_mu = get_p_value(mu_MC, 3000, 11, False)
+    # # 4) Plot hists with formulae for confirmation
+    # bins = np.linspace(0, max(f_q_mu_0), 100)
+    # ax = hist.plot_hist(f_q_mu_0, bins, logy=True, label=r"$f(q_{\mu}|0)$", density=True)
+    # ax = hist.plot_hist(f_q_mu_mu, bins, ax=ax, color="C1", label=r"$f(q_{\mu}|\mu)$", density=True)
 
-    bin_centers = (bins[1:] + bins[:-1]) / 2.
-    ax.plot(bin_centers, asymptotic(bin_centers, mu_MC, 0, sigma), color="C0")
-    ax.plot(bin_centers, asymptotic(bin_centers, mu_MC, mu_MC, sigma))
-    ax.axvline(np.median(f_q_mu_0), color="r", linewidth=2, linestyle="--")
-    ax.legend(loc="upper right")
-    plt.show()
+    # bin_centers = (bins[1:] + bins[:-1]) / 2.
+    # ax.plot(bin_centers, asymptotic(bin_centers, mu_MC, 0, sigma), color="C0")
+    # ax.plot(bin_centers, asymptotic(bin_centers, mu_MC, mu_MC, sigma))
+    # ax.axvline(np.median(f_q_mu_0), color="r", linewidth=2, linestyle="--")
+    # ax.legend(loc="upper right")
+    # plt.show()
 
-    print(f"-- fi: {idx_peak} --")
-    print(f"mu_asimov:\t{mu_asimov:.2f}\nmu_lnL:\t{mu_lnL:.2f}\nmu_MC:\t{mu_MC:.2f}")
-    print(f"sigma: {sigma:.2f}, bkg: {Y[idx_peak]:.2f}")
+    tqdm.write(f"-- fi: {idx_peak} --")
+    tqdm.write(f"mu_asimov:\t{mu_asimov:.2f}\nmu_lnL:\t{mu_lnL:.2f}\nmu_MC:\t{mu_MC:.2f}")
+    tqdm.write(f"sigma: {sigma:.2f}, bkg: {Y[idx_peak]:.2f}")
     return mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
 
 
-def main():
+def test():
     """Calculate experimental sensitivity based on simulated data."""
     # Analysis variables
     segment_size = 1000
@@ -543,46 +580,253 @@ def main():
     x_knots = np.array([2.30258509, 3.04941017, 3.79623525,
                         8.65059825, 8.95399594, 8.97733423, 9.02401079])
     model_params = np.load("bkg_model_params.npy")
-    model = models.model_spline(model_params, x_knots, shift=0)(X)
+    y_model = models.model_spline(model_params, x_knots, shift=0)(X)
 
     # Generate noise
     print("Generate noise..")
     fit_data = np.load("fit_results_skew.npz", allow_pickle=True)
     idx, interp = fit_data["idx"], fit_data["interp"]
-    noise = np.zeros_like(X)
+    y_noise = np.zeros_like(X)
     _params = np.zeros((len(idx), 2))
     for i, (start, end) in enumerate(idx):
         mu, sigma, alpha = list(map(lambda f: f(i), interp))
-        noise[start:end] = skewnorm.rvs(alpha, loc=mu, scale=sigma, size=end-start)
+        y_noise[start:end] = skewnorm.rvs(alpha, loc=mu, scale=sigma, size=end-start)
         _params[i, :] = alpha, sigma
         if i == 0:
             first_start = start
         elif i == len(idx) - 1:
             last_end = end
 
-    X, noise = X[first_start:last_end], noise[first_start:last_end]
-    Y = noise + model[first_start:last_end]
+    X, y_noise = X[first_start:last_end], y_noise[first_start:last_end]
+    Y = y_noise + y_model[first_start:last_end]
 
     # Start analysis
-    n_bins_to_check = 10
-    test_frequencies = np.random.choice(np.arange(len(X)), size=n_bins_to_check)
-    data = np.zeros((n_bins_to_check, 6))  # fi, mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
-    # For given frequency bins:
-    for i, fi in enumerate(tqdm(test_frequencies, position=0)):
-        # Calculate mu_upper with MC and with approx
-        if fi - segment_size//2 < 0:
-            lo, hi = 0, segment_size
-        elif fi + segment_size//2 > len(X):
-            lo, hi = -segment_size, len(X)
-        else:
+    # n_bins_to_check = 10
+    # test_frequencies = np.random.choice(np.arange(len(X)), size=n_bins_to_check)
+    # data = np.zeros((n_bins_to_check, 6))  # fi, mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
+    # for i, fi in enumerate(tqdm(test_frequencies, position=0)):
+    #     # tmp
+    #     _data = np.load("data.npy")
+    #     if np.load("data.npy")[i, -1] != 0:
+    #         tqdm.write(f"{i}")
+    #         continue
+    #     # Calculate mu_upper with MC and with approx
+    #     if fi - segment_size//2 < 0:
+    #         lo, hi = 0, segment_size
+    #     elif fi + segment_size//2 > len(X):
+    #         lo, hi = -segment_size, len(X)
+    #     else:
+    #         lo, hi = fi - segment_size // 2, fi + segment_size // 2
+
+    #     x, y = X[lo:hi], Y[lo:hi]
+    #     _data[i, 0] = fi
+    #     _data[i, 1:] = get_upper_limits(x, y, fi - lo)
+
+    #     # fi, mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
+    #     np.save("data.npy", _data)
+
+    data = np.load("data.npy")
+    # for i, fi in enumerate(data[:, 0]):
+    #     fi = int(fi)
+    #     mu_lnL, sigma, mu_MC, bkg = data[i, 2:]
+    #     if fi - segment_size//2 < 0:
+    #         lo, hi = 0, segment_size
+    #     elif fi + segment_size//2 > len(X):
+    #         lo, hi = -segment_size, len(X)
+    #     else:
+    #         lo, hi = fi - segment_size // 2, fi + segment_size // 2
+
+    #     print(lo, hi, fi)
+    #     x, y = X[lo:hi], Y[lo:hi]
+    #     plt.figure()
+    #     plt.plot(x, y)
+    #     xi, dx = x[fi - lo], x[fi - lo + 1] - x[fi - lo]
+    #     dy_lnL = np.sum(np.array(y > bkg+mu_lnL+1.64*sigma, dtype=int)) / float(segment_size)
+    #     dy_MC = np.sum(np.array(y > bkg+mu_MC, dtype=int)) / float(segment_size)
+    #     plt.axvline(xi, color="r", linestyle="--")
+    #     plt.errorbar(xi-0.25*dx, bkg+mu_lnL+1.64*sigma, sigma, fmt=".", label=f"lnL: {dy_lnL:.2f}", color="C1")
+    #     plt.errorbar(xi+0.25*dx, bkg+mu_MC, sigma, fmt=".", label=f"MC: {dy_MC:.2f}", color="C2")
+    #     plt.axhline(bkg+mu_lnL+1.64*sigma, color="C1")
+    #     plt.axhline(bkg+mu_MC, color="C2")
+    #     plt.legend(loc="upper right")
+    #     plt.show()
+
+    plt.figure()
+    ax = plt.subplot(111)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    x, y = np.exp(X), np.exp(Y)
+    ax.plot(x, y, label="Simulated data")
+
+    y_lnL = np.exp(data[:, 2] + data[:, 5]+1.64*data[:, 3])
+    sigma_lnL = y_lnL * data[:, 3]
+    y_MC = np.exp(data[:, 4] + data[:, 5])
+    sigma_MC = y_MC * data[:, 3]
+
+    indices = np.array(data[:, 0], dtype=int)
+    ax.errorbar(x[indices], y_lnL, sigma_lnL, fmt=".", color="C1", label="lnL")
+    ax.errorbar(x[indices], y_MC, sigma_MC, fmt=".", color="C2", label="MC")
+
+    ax.legend(loc="lower left")
+    plt.show()
+
+
+def get_upper_limits_approx(X, Y, idx_peak):
+    """Use asymptotic approximatinos to get upper limits (with uncertainty)."""
+    # Get starting estimate of background-only fit
+    # x_knots, best_fit = optimise_x_knots(X[::pruning], Y[::pruning], verbose=True)
+    # TODO: only need to do this once per segment
+    # Meanwhile tmp:
+    shift = 3
+    n_knots = 2  # VERY TMP
+    x_knots = np.linspace(min(X), max(X), n_knots)
+    a, b = np.polyfit(X, Y, deg=1)
+    y_knots = a*x_knots + b
+    # def _likelihood_no_peak(x):
+    #     params = np.concatenate([[0], x])
+    #     return -likelihood(params, 0, X, Y, x_knots, shift=shift)
+
+    # bounds = [(-10, 10), (.01, 10)] + [(min(Y), max(Y)) for x in x_knots]
+    # initial_guess = np.concatenate([[0, 0.3], y_knots])
+    # popt = minimize(_likelihood_no_peak, initial_guess,
+    #                 method="Powell", options={"ftol": 1e-10}, bounds=bounds)
+    # best_fit = popt.x  # Does not contain mu
+    best_fit = np.concatenate([[0, 0.3], y_knots])
+    ### END TMP ###
+
+    # Perform maximum likelihood fit to get mu_hat, theta_hat
+    bounds = [(None, None), (None, None), (.01, None)]  # mu, alpha, sigma
+    bounds += [(min(Y), max(Y)) for y in y_knots]
+    popt = minimize(lambda x: -likelihood(x, idx_peak, X, Y, x_knots, shift=shift),
+                    x0=np.concatenate([[0], best_fit]),
+                    method="L-BFGS-B",
+                    options={"ftol": 1e-12, "gtol": 1e-20},
+                    bounds=bounds)
+
+    # Now get sigma_mu_hat from dlnL/dmu
+    y_knots = popt.x[shift:len(x_knots)+shift]
+    y_spline = CubicSpline(x_knots, y_knots, extrapolate=False)
+    Lambda = Y[idx_peak] - y_spline(X[idx_peak])
+    Fisher = second_derivative(popt.x[1], np.sqrt(np.abs(popt.x[2])),
+                               Lambda, popt.x[0], verbose=False)
+
+    # Return mu_hat, sigma_dlnL, bkg
+    return popt.x[0], np.sqrt(-1. / Fisher), Y[idx_peak]
+
+
+def process_segment(args):
+    """Calculate an upper limit - wrapper for multiprocessing."""
+    i, x_subset, y_subset, fi, lo = args
+    return i, get_upper_limits_approx(x_subset, y_subset, fi - lo)
+
+
+def smooth_curve(y, w):
+    """Smooth data y with length w."""
+    output = np.zeros_like(y)
+    for i in trange(len(y)):
+        subset = y[max(0, i-w):i+w]
+        output[i] = np.median(subset[~np.isnan(subset)])
+    return output
+
+
+def main():
+    """Get the upper limit in every (nth?) bin using asymptotic approximations."""
+    # Analysis variables
+    segment_size = 1000
+    fmin = 10  # Hz
+    fmax = 8192  # Hz
+    resolution = 1e-6
+
+    # Process variables
+    Jdes = utils.Jdes(fmin, fmax, resolution)
+    X = np.log(np.logspace(np.log10(fmin), np.log10(fmax), Jdes))
+
+    # Get model parameters
+    x_knots = np.array([2.30258509, 3.04941017, 3.79623525,
+                        8.65059825, 8.95399594, 8.97733423, 9.02401079])
+    model_params = np.load("bkg_model_params.npy")
+    y_model = models.model_spline(model_params, x_knots, shift=0)(X)
+
+    # Generate noise
+    print("Generate noise..")
+    fit_data = np.load("fit_results_skew.npz", allow_pickle=True)
+    idx, interp = fit_data["idx"], fit_data["interp"]
+    y_noise = np.zeros_like(X)
+    _params = np.zeros((len(idx), 2))
+    for i, (start, end) in enumerate(idx):
+        mu, sigma, alpha = list(map(lambda f: f(i), interp))
+        y_noise[start:end] = skewnorm.rvs(alpha, loc=mu, scale=sigma, size=end-start)
+        _params[i, :] = alpha, sigma
+        if i == 0:
+            first_start = start
+        elif i == len(idx) - 1:
+            last_end = end
+
+    X, y_noise = X[first_start:last_end], y_noise[first_start:last_end]
+    Y = y_noise + y_model[first_start:last_end]
+
+    # Calculate upper limits
+    pruning = 100
+    freq_indices = np.arange(segment_size//2, len(X)-segment_size//2, pruning)
+    upper_limit_data = np.zeros((3, len(freq_indices)))
+    num_processes = 10
+    with Pool(num_processes) as p:
+        # Prepare the data for each worker with only subsets of X and Y
+        args = []
+        for i, fi in enumerate(freq_indices):
             lo, hi = fi - segment_size // 2, fi + segment_size // 2
+            x_subset = X[lo:hi].copy()
+            y_subset = Y[lo:hi].copy()
+            args.append((i, x_subset, y_subset, fi, lo))
 
-        x, y = X[lo:hi], Y[lo:hi]
-        data[i, 0] = fi
-        data[i, 1:] = get_upper_limits(x, y, fi - lo)
+        # Process the data in parallel
+        results = list(tqdm(p.imap(process_segment, args), total=len(args), position=0))
 
-    # fi, mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
-    np.save("data.npy", data)
+    # Update the results back in the upper_limit_data array
+    for i, upper_limit in results:
+        upper_limit_data[:, i] = upper_limit
+
+    # Checkpoint step
+    np.save("upper_limit_data.npy", upper_limit_data)
+    upper_limit_data = np.load("upper_limit_data.npy")
+
+    # Save to df
+    x, y = np.exp(X), np.exp(Y)
+    upper_limit = np.exp(upper_limit_data[2, :]
+                         + upper_limit_data[0, :]
+                         + 1.64*upper_limit_data[1, :])
+    sigma_lnL = upper_limit * upper_limit_data[1, :]
+
+    window = 10
+    upper_limit_smooth = smooth_curve(upper_limit, window)
+    sigma_lnL_smooth = smooth_curve(sigma_lnL, window)
+
+    df = pd.DataFrame({"frequency": x[freq_indices],
+                       "upper_limit": upper_limit,
+                       "uncertainty": sigma_lnL,
+                       "upper_limit_smooth": upper_limit_smooth,
+                       "uncertainty_smooth": sigma_lnL_smooth})
+    df.to_csv("preliminary_epsilon10_1243393026_1243509654_H1_upper_limits.csv")
+
+    # Plot results
+    plt.figure()
+    ax = plt.subplot(111)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.plot(x, y, label="Simulated data", zorder=1)
+    ax.fill_between(x[freq_indices],
+                    upper_limit_smooth + sigma_lnL_smooth,
+                    upper_limit_smooth - sigma_lnL_smooth,
+                    color="C1", alpha=.33, zorder=2)
+    ax.plot(x[freq_indices], upper_limit_smooth, color="C1",
+            label="Upper limit (95% C.L.)", zorder=2)
+
+    # Nice things
+    ax.legend(loc="best")
+    ax.set_xlabel("Frequency (Hz)")
+    ax.set_ylabel("PSD")
+    plt.show()
 
 
-main()
+if __name__ == '__main__':
+    main()
