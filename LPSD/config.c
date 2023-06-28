@@ -62,7 +62,9 @@ static void act_METHOD(char *s);
 static void act_tmin(char *s);
 static void act_tmax(char *s);
 static void act_fmin(char *s);
+static void act_fmin_fft(char *s);
 static void act_fmax(char *s);
+static void act_fmax_fft(char *s);
 static void act_sbin(char *s);
 static void act_time(char *s);
 static void act_colA(char *s);
@@ -90,6 +92,8 @@ static tPARSEPAIR pplist [] = {
 	{"TMAX",	act_tmax},
 	{"FMIN",	act_fmin},
 	{"FMAX",	act_fmax},
+	{"FMIN_FFT",act_fmin_fft},
+	{"FMAX_FFT",act_fmax_fft},
 	{"SBIN",	act_sbin},
 	{"TIME",	act_time},
 	{"COLA",	act_colA},
@@ -137,8 +141,10 @@ static tCFG cfg={usedefs:0,
 		asktmax:1,
 		fmin:DEFFMIN,
 		askfmin:1,
+		fmin_fft:DEFFMIN_FFT,
 		fmax:DEFFMAX,
 		askfmax:1,
+		fmax_fft:DEFFMAX_FFT,
 		fres:-1,
 		askfres:0,
 		cmdfres:0,
@@ -276,6 +282,14 @@ static void act_ulsb(char *s) {
 	cfg.ulsb=getDBLValue(s);
 	if (s[0]=='?') cfg.askulsb=1;
 	else cfg.askulsb=0;
+}
+
+static void act_fmin_fft(char *s) {
+	cfg.fmin_fft=getDBLValue(s);
+}
+
+static void act_fmax_fft(char *s) {
+	cfg.fmax_fft=getDBLValue(s);
 }
 
 static void act_desavg(char *s) {

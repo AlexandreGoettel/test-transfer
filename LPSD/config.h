@@ -19,7 +19,9 @@
 #define DEFTMIN 0
 #define DEFTMAX -1
 #define DEFFMIN -1
-#define DEFFMAX -1	
+#define DEFFMAX -1
+#define DEFFMIN_FFT -1	/* lpsd.c	- default minimum frequency to get FFT output at, -1 for fmin */
+#define DEFFMAX_FFT -1	/* lpsd.c	- default maximum frequency to get FFT output at, -1 for fmax */
 #define DEFDESAVG 100		/* desired number of averages */
 #define DEFMINAVG 10		/* minimum number of averages */
 #define DEFSBIN -1		/* use smallest bin given by window function */
@@ -100,8 +102,10 @@ typedef struct {
 	unsigned short int asktmax;
 	double fmin;
 	unsigned short int askfmin;
+	double fmin_fft;
 	double fmax;
 	unsigned short int askfmax;
+	double fmax_fft;
 	int desAVG;			/* desired number of averages for spectral estimation */
 	unsigned short int askdesAVG;
 	unsigned short int cmddesAVG;

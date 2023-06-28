@@ -230,6 +230,12 @@ void getDefaultValues()
 	}    
 	if (cfg.fmax < 0)
 		cfg.fmax = cfg.fsamp / 2.0;
+
+	// If fmin_fft or fmax_fft are not set, they should align with fmin and fmax
+//	if (cfg.fmin_fft < 0)
+//		cfg.fmin_fft = cfg.fmin;
+//	if (cfg.fmax_fft < 0)
+//		cfg.fmax_fft = cfg.fmax;
 }
 
 /* for debugging */

@@ -656,7 +656,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     register int i;
     unsigned int j, j0;  // indices over frequency space
     j = j0 = 0;
-    while (j < cfg->Jdes - 1) {
+    while (j < cfg->nspec - 1) {
         // Get index of the end of the block - the frequency at which the approximation is valid up to epsilon
         // Block starts at j0
         j0 = j;
@@ -664,7 +664,14 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         unsigned long int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
         // Block ends at j
         j = - ((double)cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / ((double)cfg->Jdes - 1.)) - 1.));
-        if (j >= cfg->Jdes) j = cfg->Jdes - 1; // TODO: take care of edge case
+        if (j >= cfg->nspec) j = cfg->nspec-1; // TODO: take care of edge case
+
+        // Only run this segment if it overlaps with fmin_fft and fmax_fft coverage
+        if (cfg->fmax_fft > 0 && data->fspec[j0] >= cfg->fmax_fft)
+        	continue;
+
+		if (cfg->fmin_fft > 0 && data->fspec[j] <= cfg->fmin_fft)
+			continue;
 
         // Prepare segment loop
         unsigned long int delta_segment = floor(Nj0 * (1.0 - (double) (cfg->ovlp / 100.)));
