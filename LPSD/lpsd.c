@@ -647,6 +647,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     // Define variables
     double epsilon = cfg->epsilon / 100.;
     double g = log(cfg->fmax / cfg->fmin);
+    unsigned int max_samples_in_memory = pow(2, cfg->n_max_mem);
 
     // Prepare data file
     struct hdf5_contents contents;
@@ -690,7 +691,6 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 
 		// Prepare FFT
 		// Whatever the value of max is, make it less than 2^31 or ints will break
-		unsigned int max_samples_in_memory = pow(2, cfg->n_max_mem);
 		unsigned long int Nfft = get_next_power_of_two(Nj0);
         // Relevant frequency range in full fft space
         unsigned int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));
@@ -856,6 +856,10 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
     gerror1("Error opening output file.. Aborting.", (*cfg).ofn);
   fclose(ofp);
   ofp = NULL;
+
+  // Make sure passed variables are ok
+  if (cfg->n_max_mem >= 31 || cfg->n_max_mem <= 0) gerror("n_max_mem should be smaller than between 1 and 31");
+  if ((cfg->fmin_fft > 0 && cfg->fmax_fft > 0) && cfg->fmin_fft >= cfg->fmax_fft) gerror("fmin_fft should be smaller than fmax_fft!");
 
   // Run the analysis
   nread = floor (((*cfg).tmax - (*cfg).tmin) * (*cfg).fsamp + 1);
