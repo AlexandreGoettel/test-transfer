@@ -22,7 +22,8 @@
 #define DEFFMAX -1
 #define DEFFMIN_FFT -1	/* lpsd.c	- default minimum frequency to get FFT output at, -1 for fmin */
 #define DEFFMAX_FFT -1	/* lpsd.c	- default maximum frequency to get FFT output at, -1 for fmax */
-#define DEFEPSILON 10  /* lpsd.c	- default value for epsilon approximation level in percent */
+#define DEFEPSILON 10 	/* lpsd.c	- default value for epsilon approximation level in percent */
+#define DEFMAXMEM -1		/* lpsd.c	- n for 2^n maximum values in memory */
 #define DEFDESAVG 100		/* desired number of averages */
 #define DEFMINAVG 10		/* minimum number of averages */
 #define DEFSBIN -1		/* use smallest bin given by window function */
@@ -68,6 +69,7 @@ typedef struct {
 	int usedefs;			/* use default values if 1, ask for remaining values otherwise */
 	char ifn[FNLEN];		/* input file name */
 	char dataset_name[FNLEN];      /* dataset name */
+	int n_max_mem;			/* n for 2^n maximum samples in memory */
 	unsigned short int askifn;
 	char ofn[FNLEN];		/* output file name */
 	unsigned short int askofn;

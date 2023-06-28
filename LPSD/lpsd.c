@@ -191,12 +191,11 @@ fill_ordered_coefficients(int n, int *coefficients) {
 
 static void
 getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
-         int *avg, struct hdf5_contents *contents)
+         int *avg, struct hdf5_contents *contents, int max_samples_in_memory)
 {
   /* Configure variables for DFT */
-  int max_samples_in_memory = 5*6577770;  // Around 500 MB //TODO: this shouldn't be hard-coded!
   if (max_samples_in_memory > nfft) max_samples_in_memory = nfft; // Don't allocate more than you need
-  // TODO: getDFT2 will stop working if nfft is higher than 2^31 and if there are more than 2 segments at j0=0 !!
+  // TODO: getDFT2 will stop working if there are more than 2 segments at j0=0 !!
 
   /* Allocate data and window memory segments */
   double *strain_data_segment = (double*) xmalloc(max_samples_in_memory * sizeof(double));
@@ -331,6 +330,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   int k_start = 0;		/* N. lines in save file. Post fail start point */
   char ch;			/* For scanning through checkpointing file */
   int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
+  int max_samples_in_memory = pow(2, cfg->n_max_mem);
   int j; 			/* Iteration variables for checkpointing data */
   FILE * file1;			/* Output file, temp for checkpointing */
   double rslt[4];		/* rslt[0]=PSD, rslt[1]=variance(PSD) rslt[2]=PS rslt[3]=variance(PS) */
@@ -368,7 +368,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   for (k = k_start; k < (*cfg).nspec; k++)
     {
       getDFT2((*data).nffts[k], (*data).bins[k], (*cfg).fsamp, (*cfg).ovlp,
-              &rslt[0], &(*data).avg[k], &contents);
+              &rslt[0], &(*data).avg[k], &contents, max_samples_in_memory);
 
       (*data).psd[k] = rslt[0];
       (*data).varpsd[k] = rslt[1];
@@ -645,7 +645,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     now = start;
 
     // Define variables
-    double epsilon = cfg->epsilon / 100.;  // TODO: pass arg
+    double epsilon = cfg->epsilon / 100.;
     double g = log(cfg->fmax / cfg->fmin);
 
     // Prepare data file
@@ -664,7 +664,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         unsigned long int Nj0 = get_N_j(j0, cfg->fsamp, cfg->fmin, cfg->fmax, cfg->Jdes);
         // Block ends at j
         j = - ((double)cfg->Jdes - 1.) / g * log(Nj0*(1. - epsilon) * cfg->fmin/cfg->fsamp * (exp(g / ((double)cfg->Jdes - 1.)) - 1.));
-        if (j >= cfg->nspec) j = cfg->nspec-1; // TODO: take care of edge case
+        if (j >= cfg->nspec) j = cfg->nspec-1;
 
         // Only run this segment if it overlaps with fmin_fft and fmax_fft coverage
         if (cfg->fmax_fft > 0 && data->fspec[j0] >= cfg->fmax_fft)
@@ -690,7 +690,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 
 		// Prepare FFT
 		// Whatever the value of max is, make it less than 2^31 or ints will break
-		unsigned int max_samples_in_memory = 536870912;  // 2^29 b = 16 Gb if double  // TODO: pass arg
+		unsigned int max_samples_in_memory = pow(2, cfg->n_max_mem);
 		unsigned long int Nfft = get_next_power_of_two(Nj0);
         // Relevant frequency range in full fft space
         unsigned int jfft_min = floor(Nfft * cfg->fmin/cfg->fsamp * exp(j0*g/(cfg->Jdes - 1.)));

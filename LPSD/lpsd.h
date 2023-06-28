@@ -20,7 +20,7 @@ void calculateSpectrum(tCFG *cfg, tDATA *data);
 void calculate_lpsd(tCFG*, tDATA*);
 static void calc_params(tCFG*, tDATA*);
 static void getDFT2(long int, double, double, double,
-                    double*, int*, struct hdf5_contents*);
+                    double*, int*, struct hdf5_contents*, int);
 
 // Block approximation
 void calculate_fft_approx(tCFG*, tDATA*);
