@@ -645,7 +645,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     now = start;
 
     // Define variables
-    double epsilon = 0.1;  // TODO: pass arg
+    double epsilon = cfg->epsilon / 100.;  // TODO: pass arg
     double g = log(cfg->fmax / cfg->fmin);
 
     // Prepare data file

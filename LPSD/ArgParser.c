@@ -52,6 +52,7 @@ static struct argp_option options[] = {
 	{"Jdes",    'J', "Total frequencies", 0, "The total number of calculated freqs",        0},
 	{"fmin_fft", 'F', "FFT fmin", 0, "Minimum frequency to calculate approx at", 	0},
 	{"fmax_fft", 'X', "FFT fmax", 0, "Maximum frequency to calculate approx at",	0},
+	{"epsilon", 'E', "epsilon", 0, "Epsilon precision factor for FFT approx in percent.",	0},
 	{0,0,0,0,0,0}
 };
 
@@ -179,6 +180,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		break;
 	case 'X':
 		arguments->fmax_fft=atof(arg);
+		break;
+	case 'E':
+		arguments->epsilon=atof(arg);
 		break;
 	case 'J':
 		arguments->Jdes=atof(arg);	

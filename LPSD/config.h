@@ -22,6 +22,7 @@
 #define DEFFMAX -1
 #define DEFFMIN_FFT -1	/* lpsd.c	- default minimum frequency to get FFT output at, -1 for fmin */
 #define DEFFMAX_FFT -1	/* lpsd.c	- default maximum frequency to get FFT output at, -1 for fmax */
+#define DEFEPSILON 10  /* lpsd.c	- default value for epsilon approximation level in percent */
 #define DEFDESAVG 100		/* desired number of averages */
 #define DEFMINAVG 10		/* minimum number of averages */
 #define DEFSBIN -1		/* use smallest bin given by window function */
@@ -81,6 +82,7 @@ typedef struct {
 	long int nfft;			/* FFTW: dimension of FFT */
 	int iter;			/* A reference number to show why step through a parallelised job. Set to zero for a single job run */
 	unsigned int Jdes;			/* Provides the total number of required frequencies */
+	double epsilon;		/* FFT approx level in percent */
 	unsigned short int asknspec;
 	double fsamp;			/* sampling frequency */
 	unsigned short int askfsamp;
