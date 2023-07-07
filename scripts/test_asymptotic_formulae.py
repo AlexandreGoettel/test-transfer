@@ -9,11 +9,12 @@ import numpy as np
 import pandas as pd
 from multiprocessing import Pool
 from matplotlib import pyplot as plt
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import CubicSpline, interp1d
 from scipy.optimize import minimize, curve_fit
 from scipy.stats import skewnorm, norm
 from scipy.special import erf, erfc
 from scipy.integrate import quad
+from scipy import constants
 import ultranest
 # Project imports
 import models
@@ -506,7 +507,7 @@ def get_upper_limits(X, Y, idx_peak):
         popt = minimize(lambda x: -_lkl(*x), np.array([.43, 1]),
                         method="Powell",
                         bounds=[(0, None), (0, None)],
-                        options={"ftol": 1e-10})
+                        options={"ftol": 1e-15})
         print(popt)
         plt.figure()
         plt.errorbar(mus,
@@ -515,8 +516,11 @@ def get_upper_limits(X, Y, idx_peak):
                      fmt=".")
         plt.axhline(alpha, linestyle="--", color="r", linewidth=2.)
         x = np.linspace(min(mus)*0.9, max(mus)*1.1, 100)
-        plt.plot(x, fit_p_value(x, .43, 1))
-        plt.plot(x, fit_p_value(x, *popt.x))
+        plt.plot(x, fit_p_value(x, .43, 1), label="Initial guess")
+        plt.plot(x, fit_p_value(x, *popt.x), label="Fit")
+        plt.xlabel(r"$\mu$ (hypothesis)")
+        plt.ylabel("p-value")
+        plt.legend(loc="upper right")
         plt.show()
 
         # Now that data is fit well, use popt to estimate mu that will give alpha
@@ -564,113 +568,6 @@ def get_upper_limits(X, Y, idx_peak):
     return mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
 
 
-def test():
-    """Calculate experimental sensitivity based on simulated data."""
-    # Analysis variables
-    segment_size = 1000
-    fmin = 10  # Hz
-    fmax = 8192  # Hz
-    resolution = 1e-6
-
-    # Process variables
-    Jdes = utils.Jdes(fmin, fmax, resolution)
-    X = np.log(np.logspace(np.log10(fmin), np.log10(fmax), Jdes))
-
-    # Get model parameters
-    x_knots = np.array([2.30258509, 3.04941017, 3.79623525,
-                        8.65059825, 8.95399594, 8.97733423, 9.02401079])
-    model_params = np.load("bkg_model_params.npy")
-    y_model = models.model_spline(model_params, x_knots, shift=0)(X)
-
-    # Generate noise
-    print("Generate noise..")
-    fit_data = np.load("fit_results_skew.npz", allow_pickle=True)
-    idx, interp = fit_data["idx"], fit_data["interp"]
-    y_noise = np.zeros_like(X)
-    _params = np.zeros((len(idx), 2))
-    for i, (start, end) in enumerate(idx):
-        mu, sigma, alpha = list(map(lambda f: f(i), interp))
-        y_noise[start:end] = skewnorm.rvs(alpha, loc=mu, scale=sigma, size=end-start)
-        _params[i, :] = alpha, sigma
-        if i == 0:
-            first_start = start
-        elif i == len(idx) - 1:
-            last_end = end
-
-    X, y_noise = X[first_start:last_end], y_noise[first_start:last_end]
-    Y = y_noise + y_model[first_start:last_end]
-
-    # Start analysis
-    # n_bins_to_check = 10
-    # test_frequencies = np.random.choice(np.arange(len(X)), size=n_bins_to_check)
-    # data = np.zeros((n_bins_to_check, 6))  # fi, mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
-    # for i, fi in enumerate(tqdm(test_frequencies, position=0)):
-    #     # tmp
-    #     _data = np.load("data.npy")
-    #     if np.load("data.npy")[i, -1] != 0:
-    #         tqdm.write(f"{i}")
-    #         continue
-    #     # Calculate mu_upper with MC and with approx
-    #     if fi - segment_size//2 < 0:
-    #         lo, hi = 0, segment_size
-    #     elif fi + segment_size//2 > len(X):
-    #         lo, hi = -segment_size, len(X)
-    #     else:
-    #         lo, hi = fi - segment_size // 2, fi + segment_size // 2
-
-    #     x, y = X[lo:hi], Y[lo:hi]
-    #     _data[i, 0] = fi
-    #     _data[i, 1:] = get_upper_limits(x, y, fi - lo)
-
-    #     # fi, mu_asimov, mu_lnL, sigma, mu_MC, Y[idx_peak]
-    #     np.save("data.npy", _data)
-
-    data = np.load("data.npy")
-    # for i, fi in enumerate(data[:, 0]):
-    #     fi = int(fi)
-    #     mu_lnL, sigma, mu_MC, bkg = data[i, 2:]
-    #     if fi - segment_size//2 < 0:
-    #         lo, hi = 0, segment_size
-    #     elif fi + segment_size//2 > len(X):
-    #         lo, hi = -segment_size, len(X)
-    #     else:
-    #         lo, hi = fi - segment_size // 2, fi + segment_size // 2
-
-    #     print(lo, hi, fi)
-    #     x, y = X[lo:hi], Y[lo:hi]
-    #     plt.figure()
-    #     plt.plot(x, y)
-    #     xi, dx = x[fi - lo], x[fi - lo + 1] - x[fi - lo]
-    #     dy_lnL = np.sum(np.array(y > bkg+mu_lnL+1.64*sigma, dtype=int)) / float(segment_size)
-    #     dy_MC = np.sum(np.array(y > bkg+mu_MC, dtype=int)) / float(segment_size)
-    #     plt.axvline(xi, color="r", linestyle="--")
-    #     plt.errorbar(xi-0.25*dx, bkg+mu_lnL+1.64*sigma, sigma, fmt=".", label=f"lnL: {dy_lnL:.2f}", color="C1")
-    #     plt.errorbar(xi+0.25*dx, bkg+mu_MC, sigma, fmt=".", label=f"MC: {dy_MC:.2f}", color="C2")
-    #     plt.axhline(bkg+mu_lnL+1.64*sigma, color="C1")
-    #     plt.axhline(bkg+mu_MC, color="C2")
-    #     plt.legend(loc="upper right")
-    #     plt.show()
-
-    plt.figure()
-    ax = plt.subplot(111)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    x, y = np.exp(X), np.exp(Y)
-    ax.plot(x, y, label="Simulated data")
-
-    y_lnL = np.exp(data[:, 2] + data[:, 5]+1.64*data[:, 3])
-    sigma_lnL = y_lnL * data[:, 3]
-    y_MC = np.exp(data[:, 4] + data[:, 5])
-    sigma_MC = y_MC * data[:, 3]
-
-    indices = np.array(data[:, 0], dtype=int)
-    ax.errorbar(x[indices], y_lnL, sigma_lnL, fmt=".", color="C1", label="lnL")
-    ax.errorbar(x[indices], y_MC, sigma_MC, fmt=".", color="C2", label="MC")
-
-    ax.legend(loc="lower left")
-    plt.show()
-
-
 def get_upper_limits_approx(X, Y, idx_peak):
     """Use asymptotic approximatinos to get upper limits (with uncertainty)."""
     # Get starting estimate of background-only fit
@@ -711,7 +608,8 @@ def get_upper_limits_approx(X, Y, idx_peak):
                                Lambda, popt.x[0], verbose=False)
 
     # Return mu_hat, sigma_dlnL, bkg
-    return popt.x[0], np.sqrt(-1. / Fisher), Y[idx_peak]
+    bkg = y_spline(X[idx_peak])
+    return popt.x[0], np.sqrt(-1. / Fisher), bkg
 
 
 def process_segment(args):
@@ -732,7 +630,7 @@ def smooth_curve(y, w):
 def main():
     """Get the upper limit in every (nth?) bin using asymptotic approximations."""
     # Analysis variables
-    segment_size = 1000
+    segment_size = 10000
     fmin = 10  # Hz
     fmax = 8192  # Hz
     resolution = 1e-6
@@ -766,29 +664,30 @@ def main():
     Y = y_noise + y_model[first_start:last_end]
 
     # Calculate upper limits
-    pruning = 100
+    pruning = 1000
     freq_indices = np.arange(segment_size//2, len(X)-segment_size//2, pruning)
-    upper_limit_data = np.zeros((3, len(freq_indices)))
-    num_processes = 10
-    with Pool(num_processes) as p:
-        # Prepare the data for each worker with only subsets of X and Y
-        args = []
-        for i, fi in enumerate(freq_indices):
-            lo, hi = fi - segment_size // 2, fi + segment_size // 2
-            x_subset = X[lo:hi].copy()
-            y_subset = Y[lo:hi].copy()
-            args.append((i, x_subset, y_subset, fi, lo))
+    # upper_limit_data = np.zeros((3, len(freq_indices)))
+    # num_processes = 11
+    # with Pool(num_processes) as p:
+    #     # Prepare the data for each worker with only subsets of X and Y
+    #     args = []
+    #     for i, fi in enumerate(freq_indices):
+    #         lo, hi = fi - segment_size // 2, fi + segment_size // 2
+    #         x_subset = X[lo:hi].copy()
+    #         y_subset = Y[lo:hi].copy()
+    #         args.append((i, x_subset, y_subset, fi, lo))
 
-        # Process the data in parallel
-        results = list(tqdm(p.imap(process_segment, args), total=len(args), position=0))
+    #     # Process the data in parallel
+    #     results = list(tqdm(p.imap(process_segment, args), total=len(args), position=0))
 
-    # Update the results back in the upper_limit_data array
-    for i, upper_limit in results:
-        upper_limit_data[:, i] = upper_limit
+    # # Update the results back in the upper_limit_data array
+    # for i, upper_limit in results:
+    #     upper_limit_data[:, i] = upper_limit
 
-    # Checkpoint step
-    np.save("upper_limit_data.npy", upper_limit_data)
-    upper_limit_data = np.load("upper_limit_data.npy")
+    # # # Checkpoint step
+    # np.save("upper_limit_data_seg10k_pru1k.npy", upper_limit_data)
+    # upper_limit_data = np.load("upper_limit_data.npy")
+    upper_limit_data = np.load("upper_limit_data_seg10k_pru1k.npy")
 
     # Save to df
     x, y = np.exp(X), np.exp(Y)
@@ -797,15 +696,17 @@ def main():
                          + 1.64*upper_limit_data[1, :])
     sigma_lnL = upper_limit * upper_limit_data[1, :]
 
-    window = 10
+    window = 50
     upper_limit_smooth = smooth_curve(upper_limit, window)
     sigma_lnL_smooth = smooth_curve(sigma_lnL, window)
+    background_smooth = smooth_curve(upper_limit_data[2, :], window)
 
     df = pd.DataFrame({"frequency": x[freq_indices],
                        "upper_limit": upper_limit,
                        "uncertainty": sigma_lnL,
                        "upper_limit_smooth": upper_limit_smooth,
-                       "uncertainty_smooth": sigma_lnL_smooth})
+                       "uncertainty_smooth": sigma_lnL_smooth,
+                       "background_spline": background_smooth})
     df.to_csv("preliminary_epsilon10_1243393026_1243509654_H1_upper_limits.csv")
 
     # Plot results
@@ -828,5 +729,57 @@ def main():
     plt.show()
 
 
+def test():
+    df = pd.read_csv("preliminary_epsilon10_1243393026_1243509654_H1_upper_limits.csv")
+    calib = np.loadtxt("../shared_git_data/Calibration_factor_A_star.txt", delimiter="\t")
+
+    f_calib = interp1d(calib[:, 1], calib[:, 0])
+    m = (df["frequency"] >= min(calib[:, 1])) & (df["frequency"] <= max(calib[:, 1]))
+    freq = df["frequency"][m]
+    upper_lim = df["upper_limit_smooth"][m]
+    sigma = df["uncertainty_smooth"][m]
+    bkg = np.exp(df["background_spline"][m])
+    a_star = f_calib(freq)
+
+    n, l, rho_local = 1, 6e-3, 0.3  # GeV/cm3
+    mass_eV = freq * constants.h / constants.e
+    beta = (n*l*constants.hbar / (mass_eV * constants.c * a_star))**2 *\
+        2 * rho_local / (freq*2*np.pi * 1e-6)
+    coupling = np.sqrt(beta * freq * 1e-6 / (upper_lim - bkg))
+
+    # Geo limits for comparison
+    geo_data = np.loadtxt("geo_limits.csv", delimiter=",")
+
+    # Plot all
+    ax = plt.subplot(111)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.plot(freq, coupling, label="LIGO", linewidth=2., color="C1")
+    ax.plot(geo_data[:, 0], geo_data[:, 1], label="GEO600", linewidth=2, color="C0")
+    ax.fill_between(freq, coupling + 0.5*sigma*coupling/(upper_lim - bkg),
+                    coupling - 0.5*sigma*coupling/(upper_lim - bkg),
+                    color="C1", alpha=.33)
+
+    # Add mass axis & nice things
+    ticks = np.array([1e-13, 1e-12, 1e-11])
+    axTop = ax.twiny()
+    axTop.set_xscale("log")
+    axTop.set_xlim(ax.get_xlim())
+    axTop.set_xticks(ticks * constants.e / constants.h)
+    axTop.set_xticklabels(ticks)
+    ax.set_xlabel("Frequency (Hz)")
+    axTop.set_xlabel("DM mass (eV)")
+    ax.set_ylabel(r"$\Lambda_i$ (GeV)")
+    ax.set_title("PRELIMINARY 95% UPPER LIMITS")
+    ax.legend(loc="upper left")
+    print(ax.get_xlim())
+    print(ax.get_ylim())
+    ax.text(np.exp(0.02*(np.log(ax.get_xlim()[1]) - np.log(ax.get_xlim()[0])) + np.log(ax.get_xlim()[0])),
+            np.exp(0.35*(np.log(ax.get_ylim()[1]) - np.log(ax.get_ylim()[0])) + np.log(ax.get_ylim()[0])),
+            "PRELIMINARY", fontsize=50, color="grey", alpha=.5)
+    plt.show()
+
+
 if __name__ == '__main__':
-    main()
+    # main()
+    test()
