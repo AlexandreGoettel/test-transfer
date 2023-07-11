@@ -277,7 +277,16 @@ static void writeHeaderLine(FILE *ofp, tGNUTERM * gt) {
 			break;
 		case 'i':
 			fprintf(ofp, "Im(PSD)	");
-                        break;
+			break;
+		case 'w':
+			fprintf(ofp, "PSD_raw	");
+			break;
+		case 'I':
+			fprintf(ofp, "Im(PSD_raw)	");
+			break;
+		case 'l':
+			fprintf(ofp, "Re(PSD_raw)	");
+			break;
 		default:
 			strcpy(&tmp[0],&((*gt).fmt[0]));
 			(*gt).fmt[c+1]=0;
@@ -346,6 +355,15 @@ static void writeData(FILE *ofp, tCFG * cfg, tDATA * data, tGNUTERM * gt) {
 				break;
 			case 'i':
 				fprintf(ofp, "%.10e\t", (*data).psd_imag[i]);
+				break;
+			case 'w':
+				fprintf(ofp, "%.10e\t", (*data).psd_raw[i]);
+				break;
+			case 'I':
+				fprintf(ofp, "%.10e\t", (*data).psd_raw_imag[i]);
+				break;
+			case 'l':
+				fprintf(ofp, "%.10e\t", (*data).psd_raw_real[i]);
 				break;
 			default:
 				break;

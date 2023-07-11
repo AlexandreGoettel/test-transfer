@@ -689,6 +689,14 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 		memset(total_real, 0, (j - j0)*sizeof(double));
 		memset(total_imag, 0, (j - j0)*sizeof(double));
 
+		// Allocate arrays used to store the raw results
+		double *total_raw = (double*) xmalloc((j - j0)*sizeof(double));
+		double *total_raw_real = (double*) xmalloc((j - j0)*sizeof(double));
+		double *total_raw_imag = (double*) xmalloc((j - j0)*sizeof(double));
+		memset(total_raw, 0, (j - j0)*sizeof(double));
+		memset(total_raw_real, 0, (j - j0)*sizeof(double));
+		memset(total_raw_imag, 0, (j - j0)*sizeof(double));
+
 		// Prepare FFT
 		// Whatever the value of max is, make it less than 2^31 or ints will break
 		unsigned long int Nfft = get_next_power_of_two(Nj0);
@@ -805,6 +813,11 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 double psd1 = y1*y1 + z1*z1;
                 double psd2 = y2*y2 + z2*z2;
                 total[ji - j0] += interpolate(x, x1, x2, psd1, psd2);
+
+                // Raw FFT results
+                total_raw_real[ji - j0] += y1;
+                total_raw_imag[ji - j0] += z1;
+                total_raw[ji - j0] += psd1;
             }
         }
         // Normalise results and add to data->psd and data->ps
@@ -817,6 +830,11 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             data->avg[ji+j0] = n_segments;
             data->psd_real[ji+j0] = total_real[ji] * norm_lin;
             data->psd_imag[ji+j0] = total_imag[ji] * norm_lin;
+
+            // Raw results
+            data->psd_raw[ji+j0] = total_raw[ji] * norm_psd;
+            data->psd_raw_real[ji+j0] = total_raw_real[ji] * norm_lin;
+            data->psd_raw_imag[ji+j0] = total_raw_imag[ji] * norm_lin;
         }
 
         // Progress tracking
@@ -832,6 +850,9 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
         xfree(total_imag);
         xfree(fft_real);
         xfree(fft_imag);
+        xfree(total_raw);
+        xfree(total_raw_real);
+        xfree(total_raw_imag);
         if (data_real) xfree(data_real);
         if (data_imag) xfree(data_imag);
         if (window) xfree(window);

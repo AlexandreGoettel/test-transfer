@@ -258,6 +258,9 @@ void memalloc(tCFG * cfg, tDATA * data)
 	(*data).varpsd = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
 	(*data).psd_real = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
 	(*data).psd_imag = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
+	(*data).psd_raw = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
+	(*data).psd_raw_real = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
+	(*data).psd_raw_imag = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
 	(*data).fspec = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
 	(*data).bins = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
 	(*data).nffts = (int *) xmalloc(((*cfg).nspec) * sizeof(int));
