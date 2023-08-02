@@ -1,5 +1,7 @@
 """Pre-process PSDs by (BF-optimized) Fitting splines through segments."""
-from tqdm import tqdm
+import os
+from tqdm import tqdm, trange
+import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.stats import skewnorm
@@ -49,9 +51,11 @@ def likelihood_spline_skew(cube, x, y_data, x_knots, shift=2):
     return np.sum(lkl, axis=0)
 
 
-def perform_single_fit(x, y, x_knots, prefix, nlive=128, verbose=False):
+def perform_single_fit(x, y, x_knots, prefix,
+                       nlive=128, dlogz=.5, pruning=10, verbose=False):
     """Perform single Bayesian optimisation, return evidence."""
     # 1. Set initial guess along straight line
+    x, y = x[::pruning], y[::pruning]
     a, b = np.polyfit(x, y, 1)
 
     # 2. Find initial parameters for the skew norm shape
@@ -78,7 +82,7 @@ def perform_single_fit(x, y, x_knots, prefix, nlive=128, verbose=False):
     # 3. Start Bayesian optimisation procedure around optimal point
     def prior(cube, *_):
         return prior_uniform(cube, popt.x, skew_uncertainty,
-                             epsilon=.04, n_sigma=3)
+                             epsilon=.03, n_sigma=3)
 
     def likelihood(cube, *_):
         return likelihood_spline_skew(cube, x, y, x_knots, shift=2)
@@ -91,41 +95,29 @@ def perform_single_fit(x, y, x_knots, prefix, nlive=128, verbose=False):
     )
     results = sampler.run(
         min_num_live_points=nlive,
+        dlogz=dlogz,
         viz_callback=False
     )
     bf = results["maximum_likelihood"]["point"]
     evidence = results["logz"]
 
-    # Plot and return
     if verbose:
-        # Plot spline
-        y_model = CubicSpline(x_knots, bf[2:])(x)
-        plt.figure()
-        plt.plot(x, y)
-        plt.plot(x, y_model)
-
-        # Plot residuals
-        res = y - y_model
-        bins = np.linspace(min(res), max(res), 50)
-        bin_centers = (bins[1:] + bins[:-1]) / 2.
-        alpha_skew, sigma_skew = bf[0], np.sqrt(np.abs(bf[1]))
-        mode = -sensutils.get_mode_skew(0, sigma_skew, alpha_skew)
-
-        ax = hist.plot_hist(res, bins, density=True)
-        ax.plot(bin_centers, skewnorm.pdf(bin_centers, alpha_skew, scale=sigma_skew, loc=mode))
-
-        # Plot corner
         cornerplot(sampler.results)
         plt.show()
 
-    return evidence
+    return evidence, bf
 
 
-def process(filename, ana_fmin=10, ana_fmax=8192, k_init=5, verbose=False, **kwargs):
+def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
+            nlive=128, ev_threshold=.5, verbose=False, **kwargs):
     """Perform pre-processing on given LPSD output file."""
     kwargs["name"] = filename
     segment_size = kwargs.pop("segment_size")
     pf = PeakFinder(**kwargs)
+    try:
+        df = pd.read_json(df_path)
+    except ValueError:
+        df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots", "alpha", "sigma_sqr"])
 
     # 0. Separate in segments
     idx_start = np.where(pf.freq >= ana_fmin)[0][0]
@@ -133,14 +125,77 @@ def process(filename, ana_fmin=10, ana_fmax=8192, k_init=5, verbose=False, **kwa
     positions = np.concatenate([
         np.arange(idx_start, idx_end, segment_size),
         [idx_end]])
-    for start, end in tqdm(zip(positions[:-1], positions[1:]),
-                           position=0, leave=True, desc="Segments"):
-        x, y = np.log(pf.freq[start:end]), np.log(pf.psd[start:end])
-        x_knots = np.linspace(x[0], x[-1], k_init)
+    for i, (start, end) in enumerate(tqdm(zip(
+            positions[:-1], positions[1:]), position=0, leave=True,
+                                          desc="Segments", total=len(positions)-1)):
+        # Skip if the entry already exists
+        if not (len(df) <= i or (len(df) > i and df.iloc[i].isnull().all())):
+            continue
 
-        perform_single_fit(x, y, x_knots,
-                           nlive=128, prefix=str(start), verbose=verbose)
-        return
+        x, y = np.log(pf.freq[start:end]), np.log(pf.psd[start:end])
+        prefix = f"{np.exp(x[0]):.1f}_{np.exp(x[-1]):.1f}_Hz"
+
+        # do-while logic until the evidence stops improving
+        ev_df = pd.DataFrame(columns=["k", "ev", "bf"])
+        for k in range(k_init - 1, k_init + 2):
+            x_knots = np.linspace(x[0], x[-1], k)
+            evidence, bf = perform_single_fit(
+                x, y, x_knots,
+                nlive=nlive, prefix=prefix, dlogz=ev_threshold)
+            ev_df = pd.concat([ev_df, pd.DataFrame(
+                {"k": k, "ev": evidence, "bf": [list(bf)]})])
+
+        if ev_df['ev'].max() == ev_df["ev"].iloc[-1]:
+            while ev_df["ev"].iloc[-1] > ev_df["ev"].iloc[-2] + ev_threshold:
+                k += 1
+                x_knots = np.linspace(x[0], x[-1], k)
+                new_ev, new_bf = perform_single_fit(
+                    x, y, x_knots, nlive=nlive, prefix=prefix, dlogz=ev_threshold)
+                ev_df = pd.concat([ev_df, pd.DataFrame(
+                    {"k": k, "ev": new_ev, "bf": [list(new_bf)]})])
+
+        idx = np.argmax(ev_df["ev"])
+        k, bf = ev_df["k"].iloc[idx], ev_df["bf"].iloc[idx]
+        x_knots = np.linspace(x[0], x[-1], k)
+        if verbose:
+            # Plot spline
+            y_model = CubicSpline(x_knots, bf[2:])(x)
+            plt.figure()
+            plt.plot(x, y, color="C0", zorder=1)
+            plt.plot(x, y_model, color="C1", zorder=2)
+            plt.scatter(x_knots, bf[2:], color="r", zorder=3)
+            plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
+
+            # Plot residuals
+            res = y - y_model
+            h0, bins = np.histogram(res, np.linspace(min(res), max(res), 50))
+            bin_centers = (bins[1:] + bins[:-1]) / 2.
+            alpha_skew, sigma_skew = bf[0], np.sqrt(np.abs(bf[1]))
+            mode = -sensutils.get_mode_skew(0, sigma_skew, alpha_skew)
+
+            ax = hist.plot_hist(res, bins, density=True)
+            ax.plot(bin_centers, skewnorm.pdf(bin_centers, alpha_skew, scale=sigma_skew, loc=mode))
+            m = h0 == 0
+            chi_sqr = np.sum((h0[~m]/np.sum(h0) - skewnorm.pdf(
+                bin_centers[~m], alpha_skew, scale=sigma_skew, loc=mode))**2
+                             / h0[~m] * np.sum(h0)) / (len(h0[~m] - 2))
+            ax.set_title(r"$\chi^2: " + f"{chi_sqr:.1f}")
+            plt.savefig(os.path.join("log", f"{prefix}_residuals.png"))
+
+            # Plot evidence over iterations
+            plt.figure()
+            plt.plot(ev_df["k"], ev_df["ev"], marker="o")
+            plt.title("Evidence vs iteration")
+            plt.savefig(os.path.join("log", f"{prefix}_evidence.png"))
+            plt.close()
+
+        # Checkpointing
+        df = pd.concat([df, pd.DataFrame({"frequencies": [[start, end]],
+                                          "x_knots": [list(x_knots)],
+                                          "y_knots": [list(bf[2:])],
+                                          "alpha": bf[0],
+                                          "sigma_sqr": bf[1]})])
+        df.to_json(df_path, orient="records")
 
 
 def main():
@@ -153,7 +208,10 @@ def main():
               "fs": 16384,
               "resolution": 1e-6
               }
-    process(path, segment_size=10000, ana_fmin=10, ana_fmax=5000, verbose=True, **kwargs)
+    df_path = os.path.join("preprocessing",
+                           os.path.split(path)[-1].split(".")[0] + ".json")
+    process(path, df_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
+            k_init=4, ev_threshold=1, nlive=64, verbose=True, **kwargs)
 
 
 if __name__ == '__main__':
