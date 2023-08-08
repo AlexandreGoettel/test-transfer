@@ -1,6 +1,6 @@
 """Pre-process PSDs by (BF-optimized) Fitting splines through segments."""
 import os
-from tqdm import tqdm, trange
+from tqdm import tqdm
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
@@ -14,6 +14,7 @@ from ultranest.plot import cornerplot
 from peak_finder import PeakFinder
 import sensutils
 import hist
+import models
 
 
 def prior_uniform(cube, initial, sigma, epsilon=.05, n_sigma=3):
@@ -198,6 +199,38 @@ def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
         df.to_json(df_path, orient="records")
 
 
+def correct_blocks(path, **kwargs):
+    """Return a path to data that has been block-corrected."""
+    kwargs["name"] = path
+    pf = PeakFinder(**kwargs)
+
+    # Preliminary spline-only fit
+    pruning = 1000
+    # x_knots, y_knots, y_sigma, sigma = pf.simple_spline_fit(
+    #     nlive=64, pruning=pruning, verbose=False)
+
+    # Get knots from block positions
+    block_positions = list(pf.block_position_gen())
+    buffer = 500
+    x_knots = np.array([np.log(pf.freq[pos])
+                        for pos in block_positions[:-1]])
+    # y_knots = np.array([np.log(np.median(pf.psd[pos:block_positions[i+1]]))
+    #                     for i, pos in enumerate(block_positions[:-1])])
+    y_knots = np.array([np.log(np.median(pf.psd[pos:pos+buffer]))
+                        for pos in block_positions[:-1]])
+
+    # Fit slopes on top of spline
+    popt, _ = pf.line_only_fit(x_knots, y_knots, block_positions,
+                               np.zeros(len(pf.psd), dtype=bool),
+                               pruning=pruning, verbose=False)
+    # Combined fit using previous result as initial guess
+    bf = pf.combine_spline_slope_smart(x_knots, y_knots, block_positions, popt,
+                                       np.zeros(len(pf.psd), dtype=bool),
+                                       pruning=1000, verbose=True,
+                                       nlive=1024, dlogz=1, epsilon=0.005)
+
+
+
 def main():
     """Organise analysis."""
     # TODO: rel. path
@@ -210,8 +243,10 @@ def main():
               }
     df_path = os.path.join("preprocessing",
                            os.path.split(path)[-1].split(".")[0] + ".json")
-    process(path, df_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
-            k_init=4, ev_threshold=1, nlive=64, verbose=True, **kwargs)
+    # Check if blocks have been corrected for
+    corrected_path = correct_blocks(path, **kwargs)
+    # process(path, df_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
+    #         k_init=4, ev_threshold=1, nlive=64, verbose=True, **kwargs)
 
 
 if __name__ == '__main__':
