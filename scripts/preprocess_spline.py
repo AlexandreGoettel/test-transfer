@@ -1,6 +1,7 @@
 """Pre-process PSDs by (BF-optimized) Fitting splines through segments."""
 import os
 from tqdm import tqdm
+import h5py
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
@@ -15,6 +16,19 @@ from peak_finder import PeakFinder
 import sensutils
 import hist
 import models
+
+
+def get_corrected_path(data_path):
+    """Generate path to store block-corrected results."""
+    return os.path.join(
+        os.path.split(data_path)[0],
+        "block_corrected_" + ".".join(os.path.split(data_path)[1].split(".")[:-1]) + ".hdf5"
+    )
+
+
+def get_df_key(data_path):
+    """Get a unique df name based on the LPSD output file name."""
+    return os.path.split(data_path)[-1].split(".")[-2]
 
 
 def prior_uniform(cube, initial, sigma, epsilon=.05, n_sigma=3):
@@ -199,15 +213,21 @@ def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
         df.to_json(df_path, orient="records")
 
 
-def correct_blocks(path, **kwargs):
+def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     """
     Apply peak finding block correction and return path to data.
 
     The first block correction enables peak finding,
     which enables a second iteration of whitening.
     """
+    # Check if corrected data is already available, if not, generate it
+    corrected_path, df_name = get_corrected_path(data_path), get_df_key(data_path)
+    peak_info = sensutils.get_results(df_name, json_path)
+    if os.path.exists(corrected_path) and peak_info is not None:
+        return
+
     # Set variables
-    kwargs["name"] = path
+    kwargs["name"] = data_path
     pf = PeakFinder(**kwargs)
     pruning = 10000
     buffer = 500
@@ -242,42 +262,54 @@ def correct_blocks(path, **kwargs):
     # Whiten fitted residuals to find peaks
     peak_mask, _ = pf.get_peak_mask_from_residuals(
         residuals, np.zeros(len(pf.psd), dtype=bool), popt_chunks, chis_chunks,
-        _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH, _CUT_ALPHA, verbose=True
+        _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH, _CUT_ALPHA, verbose=False
     )
 
     # Final fit on peak-less data (we are fitting the background after all)
     bf, Y_model = pf.combine_spline_slope_smart(x_knots, y_knots, block_positions,
                                                 bf[3+len(x_knots):], peak_mask,
                                                 pruning=pruning, verbose=False)
+
+    # Second peak-finding iteration on cleaned data
     residuals = np.log(pf.psd) - Y_model
-    del Y_model
     popt_chunks, _, chis_chunks = pf.fit_frequency_blocks(
         residuals[~peak_mask], _CFD_ALPHA, _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH,
     )
+    del Y_model
 
     # Whiten fitted residuals to find peaks
-    peak_mask, peak_info = pf.get_peak_mask_from_residuals(
+    _, peak_info = pf.get_peak_mask_from_residuals(
         residuals, peak_mask, popt_chunks, chis_chunks,
         _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH, _CUT_ALPHA,
-        pruning=100, verbose=True
+        pruning=100, verbose=verbose
     )
+    del residuals, peak_mask
+
+    # Save results
+    Y_corrected = np.log(pf.psd) - models.model_segment_slope(
+        bf, np.log(pf.freq), block_positions, shift=3+len(x_knots))
+    with h5py.File(corrected_path, "w") as _f:
+        _f.create_dataset("logPSD", data=Y_corrected, dtype="float64")
+        _f.create_dataset("frequency", data=pf.freq, dtype="float64")
+
+    df_peak = pd.DataFrame(peak_info, columns=["start_idx", "width", "max"])
+    sensutils.update_results(df_name, df_peak, json_path)
 
 
 def main():
     """Organise analysis."""
-    # TODO: rel. path
-    path = "data/result_epsilon10_1243393026_1243509654_H1.txt"
+    # TODO: rel. paths
+    json_path = "data/processing_results.json"
+    data_path = "data/result_epsilon10_1243393026_1243509654_H1.txt"
     kwargs = {"epsilon": 0.1,
               "fmin": 10,
               "fmax": 8192,
               "fs": 16384,
               "resolution": 1e-6
               }
-    df_path = os.path.join("preprocessing",
-                           os.path.split(path)[-1].split(".")[0] + ".json")
-    # Check if blocks have been corrected for
-    corrected_path = correct_blocks(path, **kwargs)
-    # process(path, df_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
+    # Correct for block structure and find peaks based on that model
+    correct_blocks(data_path, json_path, **kwargs)
+    # process(data_path, df_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
     #         k_init=4, ev_threshold=1, nlive=64, verbose=True, **kwargs)
 
 
