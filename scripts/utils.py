@@ -53,8 +53,7 @@ def read(name, dtype=np.float64, n_lines=None,
     x, y = [], []
     with open(name, "r") as _file:
         data = csv.reader(_file, delimiter=delimiter)
-        print("Reading input PSD..")
-        for row in tqdm(data, total=n_lines):
+        for row in tqdm(data, total=n_lines, desc="Reading input PSD.."):
             try:
                 if raw_freq:
                     x += [float(row[0])]
@@ -106,7 +105,7 @@ def getBinVars(y, nbins, log=True):
     else:
         bins = np.linspace(min(y), max(y), nbins)
     bin_centers = (bins[:-1] + bins[1:]) / 2.
-    bin_width = bins[1:] - bins[:-1]  # not always a constant!    
+    bin_width = bins[1:] - bins[:-1]  # not always a constant!
     return bins, bin_centers, bin_width
 
 
@@ -118,20 +117,20 @@ def getChiSquarePoisson(y, h, ddof=3):
 
 def calc_fwhm_pos(x, y):
     """Calculates the Full Width at Half Maximum (FWHM) of a curve defined by the `x` and `y` data.
-    
+
     Args:
         x (ndarray): The x-values of the curve.
         y (ndarray): The y-values of the curve.
-    
+
     Returns:
         The positions that encompass the FWTHM
     """
     # Calculate the half-maximum value of the curve
     hm = np.max(y) / 2
-    
+
     # Find the indices of the first and last points above half-maximum
     idx_start = np.argwhere(y > hm)[0][0]
     idx_end = np.argwhere(y > hm)[-1][0]
-    
+
     # Calculate the FWHM
     return x[idx_start], x[idx_end]

@@ -200,35 +200,67 @@ def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
 
 
 def correct_blocks(path, **kwargs):
-    """Return a path to data that has been block-corrected."""
+    """
+    Apply peak finding block correction and return path to data.
+
+    The first block correction enables peak finding,
+    which enables a second iteration of whitening.
+    """
+    # Set variables
     kwargs["name"] = path
     pf = PeakFinder(**kwargs)
-
-    # Preliminary spline-only fit
-    pruning = 1000
-    # x_knots, y_knots, y_sigma, sigma = pf.simple_spline_fit(
-    #     nlive=64, pruning=pruning, verbose=False)
+    pruning = 10000
+    buffer = 500
+    _SEGMENT_SIZE = int(1e4)  # Size of chunks for skew norm fits
+    _CFD_ALPHA = .05  # CFD threshold for peak zoom in fits
+    _CHI_LOW, _CHI_HIGH = .1, 2  # Quality cuts on fit results
+    _CUT_ALPHA = .99  # How much of the whitened norm data to keep
 
     # Get knots from block positions
     block_positions = list(pf.block_position_gen())
-    buffer = 500
     x_knots = np.array([np.log(pf.freq[pos])
-                        for pos in block_positions[:-1]])
-    # y_knots = np.array([np.log(np.median(pf.psd[pos:block_positions[i+1]]))
-    #                     for i, pos in enumerate(block_positions[:-1])])
+                        for pos in block_positions[:-1]] + [np.log(pf.freq[-1])])
     y_knots = np.array([np.log(np.median(pf.psd[pos:pos+buffer]))
-                        for pos in block_positions[:-1]])
+                        for pos in block_positions[:-1]] + [np.log(pf.psd[-1])])
 
     # Fit slopes on top of spline
     popt, _ = pf.line_only_fit(x_knots, y_knots, block_positions,
                                np.zeros(len(pf.psd), dtype=bool),
                                pruning=pruning, verbose=False)
     # Combined fit using previous result as initial guess
-    bf = pf.combine_spline_slope_smart(x_knots, y_knots, block_positions, popt,
-                                       np.zeros(len(pf.psd), dtype=bool),
-                                       pruning=1000, verbose=True,
-                                       nlive=1024, dlogz=1, epsilon=0.005)
+    bf, Y_model = pf.combine_spline_slope_smart(x_knots, y_knots, block_positions, popt,
+                                                np.zeros(len(pf.psd), dtype=bool),
+                                                pruning=pruning, verbose=False)
 
+    # Fit chunks with skew normals
+    residuals = np.log(pf.psd) - Y_model
+    del Y_model
+    popt_chunks, _, chis_chunks = pf.fit_frequency_blocks(
+        residuals, _CFD_ALPHA, _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH
+    )
+
+    # Whiten fitted residuals to find peaks
+    peak_mask, _ = pf.get_peak_mask_from_residuals(
+        residuals, np.zeros(len(pf.psd), dtype=bool), popt_chunks, chis_chunks,
+        _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH, _CUT_ALPHA, verbose=True
+    )
+
+    # Final fit on peak-less data (we are fitting the background after all)
+    bf, Y_model = pf.combine_spline_slope_smart(x_knots, y_knots, block_positions,
+                                                bf[3+len(x_knots):], peak_mask,
+                                                pruning=pruning, verbose=False)
+    residuals = np.log(pf.psd) - Y_model
+    del Y_model
+    popt_chunks, _, chis_chunks = pf.fit_frequency_blocks(
+        residuals[~peak_mask], _CFD_ALPHA, _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH,
+    )
+
+    # Whiten fitted residuals to find peaks
+    peak_mask, peak_info = pf.get_peak_mask_from_residuals(
+        residuals, peak_mask, popt_chunks, chis_chunks,
+        _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH, _CUT_ALPHA,
+        pruning=100, verbose=True
+    )
 
 
 def main():

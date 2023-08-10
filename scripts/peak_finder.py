@@ -248,16 +248,16 @@ class PeakFinder:
         try:
             popt, pcov, chi = hist.fit_hist(hist.skew_gaus, data, bins,
                                             p0=p0, get_chi_sqr=True)
-        except RuntimeError:
+        except (ValueError, RuntimeError):
             return np.zeros_like(p0), np.zeros((len(p0), len(p0))), np.inf
 
         if verbose:
-            plt.figure()
             ax, axRes = hist.plot_func_hist(hist.skew_gaus, popt, data, bins,
                                             label="Skew norm fit")
             ax.legend(loc="best")
             axRes.set_xlabel("log(PSD) - model")
             ax.set_title(r"$\chi^2$/ndof" + f": {chi:.2f}")
+            plt.show()
 
         return popt, pcov, chi
 
@@ -269,18 +269,16 @@ class PeakFinder:
                 _start = _end - segment_size
             yield (_start, _end)
 
-    def fit_frequency_blocks(self, data,
-                             cfd_alpha=.05, segment_size=10000,
-                             chi_lo=.1, chi_hi=2):
+    def fit_frequency_blocks(self, data, cfd_alpha=.05, segment_size=10000,
+                             chi_lo=.1, chi_hi=2, verbose=False):
         """Separate data in blocks and fit each block's projection with a skew norm."""
         start = 0
         chis = np.zeros(int(len(data) / segment_size)+1)
         popt, pcov = np.zeros((chis.shape[0], 4)), np.zeros((chis.shape[0], 4, 4))
         for i, (start, end) in enumerate(tqdm(self.get_chunk_lims(len(data), segment_size),
-                                              total=len(chis))):
+                                              total=len(chis), desc="Skew norm fits..")):
             # Perform fit
             _data = data[start:end]
-            verbose = False
             popt[i, :], pcov[i, ...], chis[i] = self.do_skew_norm_fit(
                 _data, bin_factor=.01, cfd_factor=cfd_alpha, verbose=verbose)
             if chis[i] > chi_hi:
@@ -335,14 +333,11 @@ class PeakFinder:
         whitened_data = np.zeros_like(residuals)
         chunk_limits = list(self.get_chunk_lims(len(_residuals), segment_size))
 
-        # TMP - to create good sens data
-        # np.savez("fit_results_skew.npz",
-        #          idx=chunk_limits[firstValid:lastValid+1], interp=interp_funcs)
-
         # Add variables to track chunks in original residuals data
         peak_cumsum = np.cumsum(~peak_mask) - 1
         N, _count, _previous = len(residuals), 0, 0
-        for i, (start, end) in enumerate(tqdm(chunk_limits[firstValid:lastValid+1])):
+        for i, (start, end) in enumerate(tqdm(chunk_limits[firstValid:lastValid+1],
+                                         desc="Whitening..")):
             # Loop condition
             n_loop = end - start
             while _count < N and peak_cumsum[_count] < start + n_loop:
@@ -370,20 +365,19 @@ class PeakFinder:
         # Remove start and end bad fit chunk
         _full_mask[:chunk_limits[firstValid][0]] = True
         _full_mask[chunk_limits[lastValid][1]:] = True
-        if not verbose:
-            return _full_mask, peak_info
 
-        plt.figure()
-        ax = plt.subplot(111)
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.plot(self.freq[::pruning], self.psd[::pruning], label="Original")
-        ax.plot(self.freq[~_full_mask][::pruning],
-                self.psd[~_full_mask][::pruning], label="Non-peak")
-        ax.legend(loc="upper right")
-        ax.set_xlabel("Frequency (Hz)")
-        ax.set_ylabel("PSD")
-        plt.show()
+        if verbose:
+            plt.figure()
+            ax = plt.subplot(111)
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.plot(self.freq[::pruning], self.psd[::pruning], label="Original")
+            ax.plot(self.freq[~_full_mask][::pruning],
+                    self.psd[~_full_mask][::pruning], label="Non-peak")
+            ax.legend(loc="upper right")
+            ax.set_xlabel("Frequency (Hz)")
+            ax.set_ylabel("PSD")
+            plt.show()
         return _full_mask, peak_info
 
     def combined_fit(self, peak_mask, block_positions,
@@ -482,79 +476,64 @@ class PeakFinder:
 
     def combine_spline_slope_smart(self, x_knots, y_knots, block_positions,
                                    popt, peak_mask,
-                                   epsilon=0.01,
-                                   nlive=512, dlogz=1,
                                    pruning=1000, verbose=False):
         """Combine spline and slope fit based on initial_guess."""
         # Prepare data
         X, Y = np.log(self.freq[~peak_mask][::pruning]), np.log(self.psd[~peak_mask][::pruning])
         block_positions = self.adjust_block_positions(block_positions, ~peak_mask)
         block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
-        mask = (X >= min(x_knots)) & (X <= max(x_knots))
-        X, Y = X[mask], Y[mask]
-        del peak_mask, mask
+        # mask = (X >= min(x_knots)) & (X <= max(x_knots))
+        # X, Y = X[mask], Y[mask]
+        X_sqr = X**2
+        del peak_mask
 
+        # Optimise
         def lkl(cube, *_):
-            y_spline = models.model_spline(cube, x_knots, shift=2)(X)
+            y_spline = models.model_spline(cube, x_knots, shift=3)(X)
             y_lines = models.model_segment_slope(cube, X, block_positions,
-                                                 shift=2+len(x_knots))
+                                                 shift=3+len(x_knots))
             lkl = norm.logpdf(Y - y_spline - y_lines,
-                              scale=1e-4 + np.abs(cube[0]*X + cube[1]))
+                              scale=1e-4 + np.abs(cube[0]*X_sqr + cube[1]*X + cube[2]))
             return lkl.sum()
 
-        initial_guess = np.concatenate([[0, 1], y_knots, popt])
+        initial_guess = np.concatenate([[0, 0, 1], y_knots, popt])
+        print("Starting minimisation for combined spline+slopes fit..")
         popt_combined = minimize(lambda x: -lkl(x), initial_guess,
                                  method="Powell")
+        print("Done!")
         assert popt_combined.success
         bf = popt_combined.x
 
-        # def prior(cube, *_):
-        #     lo = popt_combined.x*(1 - epsilon)
-        #     hi = popt_combined.x*(1 + epsilon)
-        #     return lo + (hi - lo) * cube.copy()
-
-        # # Run UltraNest
-        # parameters = [r"$\sigma_a$", r"$\sigma_b$"] +\
-        #     [f'$k_{i}$' for i in range(len(x_knots))] +\
-        #     [f'$a_{i}' for i in range(len(block_positions) - 1)]
-
-        # sampler = ultranest.ReactiveNestedSampler(
-        #     parameters, lkl, prior,
-        #     resume="overwrite", log_dir="log/search2"
-        # )
-        # sampler.stepsampler = ultranest.stepsampler.SliceSampler(
-        #     nsteps=2*len(parameters),
-        #     generate_direction=ultranest.stepsampler.generate_mixture_random_direction
-        # )
-        # print(f"L0: {lkl(popt_combined.x):.1f}")
-        # results = sampler.run(
-        #     min_num_live_points=nlive,
-        #     dlogz=dlogz,
-        #     viz_callback=False
-        # )
-        # evidence = results["logz"]
-        # bf = results["maximum_likelihood"]["point"]
-
         if verbose:
+            print(popt_combined)
             plt.figure()
             plt.plot(X, Y, label="Data")
-            y_spline = models.model_spline(bf, x_knots, shift=2)(X)
+            y_spline = models.model_spline(bf, x_knots, shift=3)(X)
             y_lines = models.model_segment_slope(bf, X, block_positions,
-                                                 shift=2+len(x_knots))
+                                                 shift=3+len(x_knots))
             plt.plot(X, y_spline, label="Spline only")
             plt.plot(X, y_spline + y_lines, label="Best-fit")
             plt.legend(loc="upper right")
             deviation = np.power(Y - y_spline - y_lines, 2).sum()
             plt.title(f"{deviation:.2f}")
+            plt.grid(linestyle="--", color="grey", alpha=.5)
 
             plt.figure()
-            plt.plot(X, bf[0]*X + bf[1])
+            plt.plot(X, Y - y_lines)
+            plt.title("Corrected data")
+            plt.grid(linestyle="--", color="grey", alpha=.5)
+
+            plt.figure()
+            plt.plot(X, bf[0]*X_sqr + bf[1]*X + bf[2])
             plt.title("Gaussian sigma vs frequency")
 
-            # cornerplot(results)
             plt.show()
 
-        return bf
+        # X = np.log(self.freq[self.freq < np.exp(max(x_knots))])
+        X = np.log(self.freq)
+        y_model = models.model_spline(bf, x_knots, shift=3)(X)
+        y_model += models.model_segment_slope(bf, X, block_positions, shift=3+len(x_knots))
+        return bf, y_model
 
     # def combined_slope_minimize(self, peak_mask, block_positions,
     #                             pruning, x_knots, initial_guess,

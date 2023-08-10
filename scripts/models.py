@@ -75,12 +75,14 @@ def prior_interference(cube, y_knots, y_sigma):
 
 
 # Simple spline model
-def model_spline(cube, x_knots, shift=1, extrapolate=False):
+def model_spline(cube, x_knots, shift=1, extrapolate=False, kind='linear'):
     """Cubic spline fit to be used in log-log space."""
     y_knots = cube[shift:len(x_knots)+shift]
-    return CubicSpline(x_knots, y_knots, extrapolate=extrapolate)
-    # return interp1d(x_knots, y_knots,
-    #                 fill_value=np.nan, bounds_error=not extrapolate)
+    if kind == 'cubic':
+        return CubicSpline(x_knots, y_knots, extrapolate=extrapolate)
+    else:
+        return interp1d(x_knots, y_knots,
+                        fill_value=np.nan, bounds_error=not extrapolate)
 
 
 def model_spline_vec(cube, x_knots, shift=1):
