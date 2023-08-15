@@ -177,7 +177,7 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
 
 if __name__ == '__main__':
     # Minimal example
-    n = 1000
-    data = np.linspace(0, np.pi, n)
-    model = np.sin(2*np.pi*data) + np.sin(np.pi*data) + np.random.normal(size=n)
-    bayesian_regularized_linreg(data, model, verbose=True)
+    N = 1000
+    x_data = np.linspace(0, np.pi, N)
+    model = np.sin(2*np.pi*x_data) + np.sin(np.pi*x_data) + np.random.normal(size=N)
+    bayesian_regularized_linreg(x_data, model, verbose=True)

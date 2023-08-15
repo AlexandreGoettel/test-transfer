@@ -129,7 +129,6 @@ def get_y_spline(x, *params):
     assert not len(params) % 2
     n_knots = len(params) // 2
     params = np.array(params)
-
     return CubicSpline(params[:n_knots], params[n_knots:], extrapolate=True)(x)
 
 
@@ -143,8 +142,9 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
 
     # 2. Bound x in non-overlapping blocks
     bounds = [(x_knots[0], (x_knots[1] + x_knots[0]) / 2)]
-    bounds += [(0.5 * (x_knots[i] + x_knots[i-1]),
-                0.5 * (x_knots[i] + x_knots[i+1]))
+    epsilon = 0.001 * (bounds[0][1] - bounds[0][0])
+    bounds += [(0.5 * (x_knots[i] + x_knots[i-1]) + epsilon,
+                0.5 * (x_knots[i] + x_knots[i+1]) - epsilon)
                 for i in range(1, len(x_knots)-1)]
     bounds += [(0.5 * (x_knots[-2] + x_knots[-1]), x_knots[-1])]
     # 3. Add y bounds
@@ -169,8 +169,8 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
     alpha, mu, sigma = sensutils.get_skewnorm_p0(res)
 
     # 6. Fit a skew normal
-    def fitFunc(x, *params):
-        return params[3]*skewnorm.pdf(x, params[0], loc=params[1], scale=params[2])
+    def fitFunc(_x, *params):
+        return params[3]*skewnorm.pdf(_x, params[0], loc=params[1], scale=params[2])
 
     h0, bins = np.histogram(res, nbins)
     _popt, _ = hist.fit_hist(fitFunc, res, bins, [alpha, mu, sigma, max(h0)])
@@ -180,8 +180,8 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
         plt.show()
 
     # 7. Calculate BIC :-)
-    lkl = skewnorm.pdf(res, _popt[0], loc=_popt[1], scale=_popt[2])
-    bic = lkl.sum() - 0.5 * (2*len(x_knots) + 4) * np.log(len(x))
+    _lkl = skewnorm.pdf(res, _popt[0], loc=_popt[1], scale=_popt[2])
+    bic = _lkl.sum() - 0.5 * (2*len(x_knots) + 4) * np.log(len(x))
 
     return bic, popt.x, _popt[:-1]
 
@@ -206,9 +206,13 @@ def process_hybrid(filename, json_path, pruning=1,
     positions = np.concatenate([
         np.arange(idx_start, idx_end, segment_size),
         [idx_end]])
-    for start, end in tqdm(
+    for i, (start, end) in enumerate(tqdm(
         zip(positions[:-1], positions[1:]), position=0, leave=True,
-            desc="Segments", total=len(positions)-1):
+            desc="Segments", total=len(positions)-1)):
+
+        if i != 2:
+            continue
+
         x, y = np.log(pf.freq[start:end:pruning]), np.log(pf.psd[start:end:pruning])
         best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(
             x, y, get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
