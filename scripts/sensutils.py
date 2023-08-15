@@ -134,7 +134,7 @@ def gaus_get_bic(x, y, order, **kwargs):
     N = len(residuals)
     gaussian_lkl = -1. / (2. * var) * np.sum((residuals - mu)**2) -\
         0.5*N*(np.log(var) + np.log(2*np.pi))
-    return gaussian_lkl - 0.5*(order+1)*np.log(N), popt
+    return gaussian_lkl - 0.5*(order+1)*np.log(N), popt, [mu, var]
 
 
 def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
@@ -150,17 +150,17 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
     # Loop over k
     orders = np.arange(k_min, k_max)
     bics = np.zeros(len(orders), dtype=np.float64)
-    best_bic, best_popt = -np.inf, None
+    best_bic, best_f_popt, best_distr_popt = -np.inf, None, None
     for i, order in tqdm(enumerate(orders),
                          desc="BIC..", total=k_max-k_min, position=1, leave=False):
         # Fit a polynomial
-        bics[i], popt = get_bic(x, y, order, **bic_kwargs)
+        bics[i], f_popt, distr_popt = get_bic(x, y, order, **bic_kwargs)
 
         if bics[i] > best_bic:
             best_bic = bics[i]
-            best_popt = popt
+            best_f_popt, best_distr_popt = f_popt, distr_popt
 
-    best_fit = f_fit(x, *best_popt)
+    best_fit = f_fit(x, *best_f_popt)
     if verbose:
         # Plot results
         plt.plot(x, y, ".", label="Data", zorder=1)
@@ -172,7 +172,7 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
         plt.legend(loc="best")
         plt.show()
 
-    return best_fit
+    return best_fit, best_f_popt, best_distr_popt
 
 
 if __name__ == '__main__':

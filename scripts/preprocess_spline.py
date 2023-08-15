@@ -183,21 +183,22 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
     lkl = skewnorm.pdf(res, _popt[0], loc=_popt[1], scale=_popt[2])
     bic = lkl.sum() - 0.5 * (2*len(x_knots) + 4) * np.log(len(x))
 
-    return bic, popt.x
+    return bic, popt.x, _popt[:-1]
 
 
-def process_hybrid(filename, k_min=4, k_max=20,
+def process_hybrid(filename, json_path, pruning=1,
                    ana_fmin=10, ana_fmax=5000, segment_size=10000,
+                   k_min=4, k_max=20, buffer=40, nbins=50,  # bic args
                    verbose=False, **kwargs):
     """For now just a BIC testing area."""
     kwargs["name"] = filename
     pf = PeakFinder(**kwargs)
     # Get the results DataFrame
-    # df_key = "splines_" + get_df_key(filename)
-    # df = sensutils.get_results(df_key, json_path)
-    # if df is None:
-    #     df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
-    #                                "skew_alpha", "skew_mu", "skew_sigma"])
+    df_key = "splines_" + get_df_key(filename)
+    df = sensutils.get_results(df_key, json_path)
+    if df is None:
+        df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
+                                   "alpha_skew", "loc_skew", "sigma_skew"])
 
     # Minimise using bic
     idx_start = np.where(pf.freq >= ana_fmin)[0][0]
@@ -205,17 +206,17 @@ def process_hybrid(filename, k_min=4, k_max=20,
     positions = np.concatenate([
         np.arange(idx_start, idx_end, segment_size),
         [idx_end]])
-    for i, (start, end) in enumerate(tqdm(zip(
-            positions[:-1], positions[1:]), position=0, leave=True,
-                                          desc="Segments", total=len(positions)-1)):
-        x, y = np.log(pf.freq[start:end]), np.log(pf.psd[start:end])
-        best_fit = sensutils.bayesian_regularized_linreg(
+    for start, end in tqdm(
+        zip(positions[:-1], positions[1:]), position=0, leave=True,
+            desc="Segments", total=len(positions)-1):
+        x, y = np.log(pf.freq[start:end:pruning]), np.log(pf.psd[start:end:pruning])
+        best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(
             x, y, get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
             plot_mean=True, kernel_size=800, verbose=False,
-            buffer=40, nbins=50)  # bic_kwargs
+            buffer=buffer, nbins=nbins)  # bic_kwargs
 
         if verbose:
-            prefix = f"[{x[0]:.1f}-{x[-1]:.1f}] Hz"
+            prefix = f"[{x[0]:.2f}-{x[-1]:.2f}] Hz"
             plt.figure()
             plt.plot(x, y)
             plt.plot(x, best_fit)
@@ -226,108 +227,14 @@ def process_hybrid(filename, k_min=4, k_max=20,
             plt.close()
 
         # Checkpointing
-        # df = pd.concat([df, pd.DataFrame({"frequencies": [[start, end]],
-        #                                   "x_knots": [list(x_knots)],
-        #                                   "y_knots": [list(bf[2:])],
-        #                                   "alpha": bf[0],
-        #                                   "sigma_sqr": bf[1],
-        #                                   "evidence": ev_df["ev"].iloc[idx]})])
-        # sensutils.update_results(df_key, df, json_path, orient="records")
-
-
-def process(filename, json_path, ana_fmin=10, ana_fmax=8192, k_init=5,
-            nlive=128, ev_threshold=.5, verbose=False, **kwargs):
-    """Perform pre-processing on given LPSD output file."""
-    kwargs["name"] = filename
-    segment_size = kwargs.pop("segment_size")
-    pf = PeakFinder(**kwargs)
-    # Get the results DataFrame
-    df_key = "splines_" + get_df_key(filename)
-    df = sensutils.get_results(df_key, json_path)
-    if df is None:
-        df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
-                                   "alpha", "sigma_sqr", "evidence"])
-
-    # 0. Separate in segments
-    idx_start = np.where(pf.freq >= ana_fmin)[0][0]
-    idx_end = np.where(pf.freq <= ana_fmax)[0][-1]
-    positions = np.concatenate([
-        np.arange(idx_start, idx_end, segment_size),
-        [idx_end]])
-    for i, (start, end) in enumerate(tqdm(zip(
-            positions[:-1], positions[1:]), position=0, leave=True,
-                                          desc="Segments", total=len(positions)-1)):
-        # Skip if the entry already exists
-        if not (len(df) <= i or (len(df) > i and df.iloc[i].isnull().all())):
-            continue
-
-        x, y = np.log(pf.freq[start:end]), np.log(pf.psd[start:end])
-        prefix = f"{np.exp(x[0]):.1f}_{np.exp(x[-1]):.1f}_Hz"
-
-        # do-while logic until the evidence stops improving
-        ev_df = pd.DataFrame(columns=["k", "ev", "bf"])
-        for k in range(k_init - 1, k_init + 2):
-            x_knots = np.linspace(x[0], x[-1], k)
-            evidence, bf = perform_single_fit(
-                x, y, x_knots,
-                nlive=nlive, prefix=prefix, dlogz=ev_threshold)
-            ev_df = pd.concat([ev_df, pd.DataFrame(
-                {"k": k, "ev": evidence, "bf": [list(bf)]})])
-
-        if ev_df['ev'].max() == ev_df["ev"].iloc[-1]:
-            while ev_df["ev"].iloc[-1] > ev_df["ev"].iloc[-2] + ev_threshold:
-                k += 1
-                x_knots = np.linspace(x[0], x[-1], k)
-                new_ev, new_bf = perform_single_fit(
-                    x, y, x_knots, nlive=nlive, prefix=prefix, dlogz=ev_threshold)
-                ev_df = pd.concat([ev_df, pd.DataFrame(
-                    {"k": k, "ev": new_ev, "bf": [list(new_bf)]})])
-
-        idx = np.argmax(ev_df["ev"])
-        k, bf = ev_df["k"].iloc[idx], ev_df["bf"].iloc[idx]
-        x_knots = np.linspace(x[0], x[-1], k)
-        if verbose:
-            # Plot spline
-            y_model = CubicSpline(x_knots, bf[2:])(x)
-            plt.figure()
-            plt.plot(x, y, color="C0", zorder=1)
-            plt.plot(x, y_model, color="C1", zorder=2)
-            plt.plot(x, sensutils.running_average(y, 100, kind="median"), zorder=2, color="C2")
-            plt.scatter(x_knots, bf[2:], color="r", zorder=3)
-            plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
-            plt.close()
-
-            # Plot residuals
-            res = y - y_model
-            h0, bins = np.histogram(res, np.linspace(min(res), max(res), 50))
-            bin_centers = (bins[1:] + bins[:-1]) / 2.
-            alpha_skew, sigma_skew = bf[0], np.sqrt(np.abs(bf[1]))
-            mode = -sensutils.get_mode_skew(0, sigma_skew, alpha_skew)
-
-            ax = hist.plot_hist(res, bins, density=True)
-            ax.plot(bin_centers, skewnorm.pdf(bin_centers, alpha_skew, scale=sigma_skew, loc=mode))
-            m = h0 == 0
-            chi_sqr = np.sum((h0[~m]/np.sum(h0) - skewnorm.pdf(
-                bin_centers[~m], alpha_skew, scale=sigma_skew, loc=mode))**2
-                             / h0[~m] * np.sum(h0)) / (len(h0[~m] - 2))
-            ax.set_title(r"$\chi^2: " + f"{chi_sqr:.1f}")
-            plt.savefig(os.path.join("log", f"{prefix}_residuals.png"))
-            plt.close()
-
-            # Plot evidence over iterations
-            plt.figure()
-            plt.plot(ev_df["k"], ev_df["ev"], marker="o")
-            plt.title("Evidence vs iteration")
-            plt.savefig(os.path.join("log", f"{prefix}_evidence.png"))
-            plt.close()
-
-        # Checkpointing
+        assert not len(f_popt) % 2
+        n_knots = len(f_popt) // 2
         df = pd.concat([df, pd.DataFrame({"frequencies": [[start, end]],
-                                          "x_knots": [list(x_knots)],
-                                          "y_knots": [list(bf[2:])],
-                                          "alpha": bf[0],
-                                          "sigma_sqr": bf[1],
-                                          "evidence": ev_df["ev"].iloc[idx]})])
+                                          "x_knots": [list(f_popt[:n_knots])],
+                                          "y_knots": [list(f_popt[n_knots:])],
+                                          "alpha_skew": distr_popt[0],
+                                          "loc_skew": distr_popt[1],
+                                          "sigma_skew": distr_popt[2]})])
         sensutils.update_results(df_key, df, json_path, orient="records")
 
 
@@ -427,10 +334,12 @@ def main():
               }
     # Correct for block structure and find peaks based on that model
     correct_blocks(data_path, json_path, **kwargs)
-    # process(data_path, json_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
-    #         k_init=4, ev_threshold=1, nlive=64, verbose=True, **kwargs)
-    # process_kde(data_path, json_path, **kwargs)
-    process_hybrid(data_path, verbose=True, **kwargs)
+
+    # Fit a bayesian regularized spline model using a skew normal likelihood
+    process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
+                   segment_size=10000, k_min=4, k_max=20,
+                   buffer=40, nbins=50, pruning=2,
+                   verbose=True, **kwargs)
 
 
 if __name__ == '__main__':
