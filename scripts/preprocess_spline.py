@@ -5,9 +5,10 @@ import h5py
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.stats import skewnorm
+from scipy.stats import skewnorm, poisson
 from scipy.interpolate import CubicSpline
 from scipy.optimize import minimize
+from scipy.signal import convolve
 # Custom imports
 import ultranest
 from ultranest.plot import cornerplot
@@ -105,8 +106,8 @@ def perform_single_fit(x, y, x_knots, prefix,
     parameters = [r"$\alpha$", r"$\sigma$"] + [f"$k_{i}$" for i in range(len(x_knots))]
     sampler = ultranest.ReactiveNestedSampler(
         parameters, likelihood, prior,
-        vectorized=True, ndraw_min=nlive//2,
-        resume="overwrite", log_dir=f"log/{prefix}_"
+        vectorized=True, ndraw_min=nlive//2
+        # resume="overwrite", log_dir=f"log/{prefix}_"
     )
     results = sampler.run(
         min_num_live_points=nlive,
@@ -123,16 +124,129 @@ def perform_single_fit(x, y, x_knots, prefix,
     return evidence, bf
 
 
-def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
+def get_y_spline(x, *params):
+    """Apply spline model on x."""
+    assert not len(params) % 2
+    n_knots = len(params) // 2
+    params = np.array(params)
+
+    return CubicSpline(params[:n_knots], params[n_knots:], extrapolate=True)(x)
+
+
+def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
+    """Perform spline fit and return skew-norm BIC."""
+    # 1. Choose x_knots
+    x_knots = np.linspace(min(x), max(x), n_knots)
+    # 1.1 Choose y_knots based on y data
+    y_knots = np.array([np.median(y[max(0, np.where(x >= knot)[0][0] - buffer):
+        np.where(x >= knot)[0][0] + buffer]) for knot in x_knots])
+
+    # 2. Bound x in non-overlapping blocks
+    bounds = [(x_knots[0], (x_knots[1] + x_knots[0]) / 2)]
+    bounds += [(0.5 * (x_knots[i] + x_knots[i-1]),
+                0.5 * (x_knots[i] + x_knots[i+1]))
+                for i in range(1, len(x_knots)-1)]
+    bounds += [(0.5 * (x_knots[-2] + x_knots[-1]), x_knots[-1])]
+    # 3. Add y bounds
+    bounds += [(None, None) for y in y_knots]
+
+    # 4. Minimize mean square error
+    def lkl(params):
+        y_spline = get_y_spline(x, *params)
+        return ((y - y_spline)**2).sum()
+    popt = minimize(lkl, np.concatenate([x_knots, y_knots]),
+                    method="Nelder-Mead", bounds=bounds)
+
+    y_spline = get_y_spline(x, *popt.x)
+    if verbose:
+        print(popt)
+        plt.plot(x, y, zorder=1)
+        plt.plot(x, y_spline, zorder=2)
+        plt.scatter(popt.x[:n_knots], popt.x[n_knots:], color="r", zorder=3)
+
+    # 5. Get starting parameters for skew normal
+    res = y - y_spline
+    alpha, mu, sigma = sensutils.get_skewnorm_p0(res)
+
+    # 6. Fit a skew normal
+    def fitFunc(x, *params):
+        return params[3]*skewnorm.pdf(x, params[0], loc=params[1], scale=params[2])
+
+    h0, bins = np.histogram(res, nbins)
+    _popt, _ = hist.fit_hist(fitFunc, res, bins, [alpha, mu, sigma, max(h0)])
+
+    if verbose:
+        hist.plot_func_hist(fitFunc, _popt, res, bins)
+        plt.show()
+
+    # 7. Calculate BIC :-)
+    lkl = skewnorm.pdf(res, _popt[0], loc=_popt[1], scale=_popt[2])
+    bic = lkl.sum() - 0.5 * (2*len(x_knots) + 4) * np.log(len(x))
+
+    return bic, popt.x
+
+
+def process_hybrid(filename, k_min=4, k_max=20,
+                   ana_fmin=10, ana_fmax=5000, segment_size=10000,
+                   verbose=False, **kwargs):
+    """For now just a BIC testing area."""
+    kwargs["name"] = filename
+    pf = PeakFinder(**kwargs)
+    # Get the results DataFrame
+    # df_key = "splines_" + get_df_key(filename)
+    # df = sensutils.get_results(df_key, json_path)
+    # if df is None:
+    #     df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
+    #                                "skew_alpha", "skew_mu", "skew_sigma"])
+
+    # Minimise using bic
+    idx_start = np.where(pf.freq >= ana_fmin)[0][0]
+    idx_end = np.where(pf.freq <= ana_fmax)[0][-1]
+    positions = np.concatenate([
+        np.arange(idx_start, idx_end, segment_size),
+        [idx_end]])
+    for i, (start, end) in enumerate(tqdm(zip(
+            positions[:-1], positions[1:]), position=0, leave=True,
+                                          desc="Segments", total=len(positions)-1)):
+        x, y = np.log(pf.freq[start:end]), np.log(pf.psd[start:end])
+        best_fit = sensutils.bayesian_regularized_linreg(
+            x, y, get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
+            plot_mean=True, kernel_size=800, verbose=False,
+            buffer=40, nbins=50)  # bic_kwargs
+
+        if verbose:
+            prefix = f"[{x[0]:.1f}-{x[-1]:.1f}] Hz"
+            plt.figure()
+            plt.plot(x, y)
+            plt.plot(x, best_fit)
+            plt.title(prefix)
+            plt.xlabel("log(Hz)")
+            plt.ylabel("log(PSD)")
+            plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
+            plt.close()
+
+        # Checkpointing
+        # df = pd.concat([df, pd.DataFrame({"frequencies": [[start, end]],
+        #                                   "x_knots": [list(x_knots)],
+        #                                   "y_knots": [list(bf[2:])],
+        #                                   "alpha": bf[0],
+        #                                   "sigma_sqr": bf[1],
+        #                                   "evidence": ev_df["ev"].iloc[idx]})])
+        # sensutils.update_results(df_key, df, json_path, orient="records")
+
+
+def process(filename, json_path, ana_fmin=10, ana_fmax=8192, k_init=5,
             nlive=128, ev_threshold=.5, verbose=False, **kwargs):
     """Perform pre-processing on given LPSD output file."""
     kwargs["name"] = filename
     segment_size = kwargs.pop("segment_size")
     pf = PeakFinder(**kwargs)
-    try:
-        df = pd.read_json(df_path)
-    except ValueError:
-        df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots", "alpha", "sigma_sqr"])
+    # Get the results DataFrame
+    df_key = "splines_" + get_df_key(filename)
+    df = sensutils.get_results(df_key, json_path)
+    if df is None:
+        df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
+                                   "alpha", "sigma_sqr", "evidence"])
 
     # 0. Separate in segments
     idx_start = np.where(pf.freq >= ana_fmin)[0][0]
@@ -178,8 +292,10 @@ def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
             plt.figure()
             plt.plot(x, y, color="C0", zorder=1)
             plt.plot(x, y_model, color="C1", zorder=2)
+            plt.plot(x, sensutils.running_average(y, 100, kind="median"), zorder=2, color="C2")
             plt.scatter(x_knots, bf[2:], color="r", zorder=3)
             plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
+            plt.close()
 
             # Plot residuals
             res = y - y_model
@@ -196,6 +312,7 @@ def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
                              / h0[~m] * np.sum(h0)) / (len(h0[~m] - 2))
             ax.set_title(r"$\chi^2: " + f"{chi_sqr:.1f}")
             plt.savefig(os.path.join("log", f"{prefix}_residuals.png"))
+            plt.close()
 
             # Plot evidence over iterations
             plt.figure()
@@ -209,8 +326,9 @@ def process(filename, df_path, ana_fmin=10, ana_fmax=8192, k_init=5,
                                           "x_knots": [list(x_knots)],
                                           "y_knots": [list(bf[2:])],
                                           "alpha": bf[0],
-                                          "sigma_sqr": bf[1]})])
-        df.to_json(df_path, orient="records")
+                                          "sigma_sqr": bf[1],
+                                          "evidence": ev_df["ev"].iloc[idx]})])
+        sensutils.update_results(df_key, df, json_path, orient="records")
 
 
 def correct_blocks(data_path, json_path, verbose=False, **kwargs):
@@ -309,8 +427,10 @@ def main():
               }
     # Correct for block structure and find peaks based on that model
     correct_blocks(data_path, json_path, **kwargs)
-    # process(data_path, df_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
+    # process(data_path, json_path, segment_size=10000, ana_fmin=10, ana_fmax=5000,
     #         k_init=4, ev_threshold=1, nlive=64, verbose=True, **kwargs)
+    # process_kde(data_path, json_path, **kwargs)
+    process_hybrid(data_path, verbose=True, **kwargs)
 
 
 if __name__ == '__main__':
