@@ -339,7 +339,7 @@ def main():
     # Fit a bayesian regularized spline model using a skew normal likelihood
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
                    segment_size=10000, k_min=4, k_max=20,
-                   buffer=40, nbins=50, pruning=2,
+                   buffer=40, nbins=50, pruning=10,
                    verbose=True, **kwargs)
 
 

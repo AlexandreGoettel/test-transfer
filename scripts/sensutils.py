@@ -21,9 +21,13 @@ def get_skewnorm_p0(data):
     _skew = ((data - mean)**3).sum() * n / ((n - 1) * (n - 2))
     _skew = skew(data, bias=False)
 
+    # Correct for numerical problems
+    if np.abs(_skew) > .99:
+        _skew = np.sign(_skew)*.99
+
     # Get skew normal parameters
     gamma = np.abs(_skew)**(2/3.)
-    delta = -np.sqrt(0.5*np.pi*gamma / (gamma + (0.5*(4 - np.pi))**(2/3.)))
+    delta = np.sign(_skew) * np.sqrt(0.5*np.pi*gamma / (gamma + (0.5*(4 - np.pi))**(2/3.)))
     alpha = delta / np.sqrt(1. - delta**2)
     sigma = np.sqrt(var / (1. - 2/np.pi*delta**2))
     mu = mean - sigma * delta * np.sqrt(2 / np.pi)
