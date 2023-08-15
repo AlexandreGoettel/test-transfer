@@ -210,9 +210,6 @@ def process_hybrid(filename, json_path, pruning=1,
         zip(positions[:-1], positions[1:]), position=0, leave=True,
             desc="Segments", total=len(positions)-1)):
 
-        if i != 2:
-            continue
-
         x, y = np.log(pf.freq[start:end:pruning]), np.log(pf.psd[start:end:pruning])
         best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(
             x, y, get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
