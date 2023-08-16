@@ -5,10 +5,10 @@ import h5py
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.stats import skewnorm, poisson
+from matplotlib.gridspec import GridSpec
+from scipy.stats import skewnorm
 from scipy.interpolate import CubicSpline
 from scipy.optimize import minimize
-from scipy.signal import convolve
 # Custom imports
 import ultranest
 from ultranest.plot import cornerplot
@@ -188,7 +188,7 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
 
 def process_hybrid(filename, json_path, pruning=1,
                    ana_fmin=10, ana_fmax=5000, segment_size=10000,
-                   k_min=4, k_max=20, buffer=40, nbins=50,  # bic args
+                   k_min=4, k_max=20, k_pruning=1, buffer=40, nbins=50,  # bic args
                    verbose=False, **kwargs):
     """For now just a BIC testing area."""
     kwargs["name"] = filename
@@ -206,24 +206,34 @@ def process_hybrid(filename, json_path, pruning=1,
     positions = np.concatenate([
         np.arange(idx_start, idx_end, segment_size),
         [idx_end]])
-    for i, (start, end) in enumerate(tqdm(
-        zip(positions[:-1], positions[1:]), position=0, leave=True,
-            desc="Segments", total=len(positions)-1)):
+    pbar = tqdm(total=len(positions[:-1]), position=0, leave=True, desc="Segments")
+    for i, (start, end) in enumerate(zip(positions[:-1], positions[1:])):
+        # Skip if the entry already exists
+        if not (len(df) <= i or (len(df) > i and df.iloc[i].isnull().any())):
+            pbar.total -= 1
+            pbar.update(1)
+            continue
 
         x, y = np.log(pf.freq[start:end:pruning]), np.log(pf.psd[start:end:pruning])
         best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(
             x, y, get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
-            plot_mean=True, kernel_size=800, verbose=False,
+            k_pruning=k_pruning, plot_mean=True, kernel_size=800, verbose=False,
             buffer=buffer, nbins=nbins)  # bic_kwargs
 
         if verbose:
-            prefix = f"[{x[0]:.2f}-{x[-1]:.2f}] Hz"
-            plt.figure()
-            plt.plot(x, y)
-            plt.plot(x, best_fit)
-            plt.title(prefix)
-            plt.xlabel("log(Hz)")
-            plt.ylabel("log(PSD)")
+            prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
+            fig = plt.figure(figsize=(16, 9))
+            gs = GridSpec(4, 1)
+            ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
+            ax.plot(x, y)
+            ax.plot(x, best_fit)
+            ax.set_title(prefix)
+            ax.set_ylabel("log(PSD)")
+            axRes.set_xlabel("log(Hz)")
+            axRes.grid(linestyle="--", color="grey", alpha=.5)
+            axRes.plot(x, y - best_fit, ".", zorder=1)
+            axRes.axhline(0, color="r", zorder=2)
+            plt.savefig(os.path.join("log", f"{prefix}_spline.pdf"))
             plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
             plt.close()
 
@@ -237,6 +247,8 @@ def process_hybrid(filename, json_path, pruning=1,
                                           "loc_skew": distr_popt[1],
                                           "sigma_skew": distr_popt[2]})])
         sensutils.update_results(df_key, df, json_path, orient="records")
+        pbar.update(1)
+    pbar.close()
 
 
 def correct_blocks(data_path, json_path, verbose=False, **kwargs):
@@ -338,8 +350,8 @@ def main():
 
     # Fit a bayesian regularized spline model using a skew normal likelihood
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
-                   segment_size=10000, k_min=4, k_max=20,
-                   buffer=40, nbins=50, pruning=10,
+                   segment_size=10000, k_min=4, k_max=40, k_pruning=2,
+                   buffer=40, nbins=50, pruning=1,
                    verbose=True, **kwargs)
 
 
