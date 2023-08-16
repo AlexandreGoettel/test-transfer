@@ -1,5 +1,6 @@
 """Pre-process PSDs by (BF-optimized) Fitting splines through segments."""
 import os
+from multiprocessing import Pool
 from tqdm import tqdm
 import h5py
 import pandas as pd
@@ -67,7 +68,7 @@ def likelihood_spline_skew(cube, x, y_data, x_knots, shift=2):
     return np.sum(lkl, axis=0)
 
 
-def perform_single_fit(x, y, x_knots, prefix,
+def perform_single_fit(x, y, x_knots,
                        nlive=128, dlogz=.5, pruning=10, verbose=False):
     """Perform single Bayesian optimisation, return evidence."""
     # 1. Set initial guess along straight line
@@ -186,7 +187,30 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
     return bic, popt.x, _popt[:-1]
 
 
-def process_hybrid(filename, json_path, pruning=1,
+def process_iteration(params):
+    """Wrap call to bayesian_regularized_linreg in parallel."""
+    i, x, y, kwargs, verbose = params
+    best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(x, y, **kwargs)
+    if verbose:
+        prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
+        fig = plt.figure(figsize=(16, 9))
+        gs = GridSpec(4, 1)
+        ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
+        ax.plot(x, y)
+        ax.plot(x, best_fit)
+        ax.set_title(prefix)
+        ax.set_ylabel("log(PSD)")
+        axRes.set_xlabel("log(Hz)")
+        axRes.grid(linestyle="--", color="grey", alpha=.5)
+        axRes.plot(x, y - best_fit, ".", zorder=1)
+        axRes.axhline(0, color="r", zorder=2)
+        plt.savefig(os.path.join("log", f"{prefix}_spline.pdf"))
+        plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
+        plt.close()
+    return i, f_popt, distr_popt
+
+
+def process_hybrid(filename, json_path, pruning=1, n_processes=1,
                    ana_fmin=10, ana_fmax=5000, segment_size=10000,
                    k_min=4, k_max=20, k_pruning=1, buffer=40, nbins=50,  # bic args
                    verbose=False, **kwargs):
@@ -206,38 +230,33 @@ def process_hybrid(filename, json_path, pruning=1,
     positions = np.concatenate([
         np.arange(idx_start, idx_end, segment_size),
         [idx_end]])
-    pbar = tqdm(total=len(positions[:-1]), position=0, leave=True, desc="Segments")
-    for i, (start, end) in enumerate(zip(positions[:-1], positions[1:])):
-        # Skip if the entry already exists
-        if not (len(df) <= i or (len(df) > i and df.iloc[i].isnull().any())):
-            pbar.total -= 1
-            pbar.update(1)
-            continue
+    # pbar = tqdm(total=len(positions[:-1]), position=0, leave=True, desc="Segments")
 
-        x, y = np.log(pf.freq[start:end:pruning]), np.log(pf.psd[start:end:pruning])
-        best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(
-            x, y, get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
-            k_pruning=k_pruning, plot_mean=True, kernel_size=800, verbose=False,
-            buffer=buffer, nbins=nbins)  # bic_kwargs
+    def make_args():
+        kwargs = dict(get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
+                      k_pruning=k_pruning, plot_mean=True, kernel_size=800, verbose=False,
+                      buffer=buffer, nbins=nbins)
+        for i, (start, end) in enumerate(zip(positions[:-1], positions[1:])):
+            # Skip if the entry already exists
+            if not (len(df) <= i or (len(df) > i and df.iloc[i].isnull().any())):
+                continue
+            kwargs["disable_tqdm"] = i != len(df) + 1
+            x, y = np.log(pf.freq[start:end:pruning]), np.log(pf.psd[start:end:pruning])
+            yield i, x, y, kwargs, verbose
 
-        if verbose:
-            prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
-            fig = plt.figure(figsize=(16, 9))
-            gs = GridSpec(4, 1)
-            ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
-            ax.plot(x, y)
-            ax.plot(x, best_fit)
-            ax.set_title(prefix)
-            ax.set_ylabel("log(PSD)")
-            axRes.set_xlabel("log(Hz)")
-            axRes.grid(linestyle="--", color="grey", alpha=.5)
-            axRes.plot(x, y - best_fit, ".", zorder=1)
-            axRes.axhline(0, color="r", zorder=2)
-            plt.savefig(os.path.join("log", f"{prefix}_spline.pdf"))
-            plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
-            plt.close()
+    # Parallel calculation
+    with Pool(processes=n_processes) as pool:
+        results = []
+        with tqdm(total=len(positions)-1-len(df), desc="Minimise BIC") as pbar:
+            for result in pool.imap_unordered(process_iteration, make_args()):
+                results.append(result)
+                pbar.update(1)
 
-        # Checkpointing
+    # Post-processing
+    for result in results:
+        i, f_popt, distr_popt = result
+        start, end = positions[i]
+
         assert not len(f_popt) % 2
         n_knots = len(f_popt) // 2
         df = pd.concat([df, pd.DataFrame({"frequencies": [[start, end]],
@@ -247,8 +266,6 @@ def process_hybrid(filename, json_path, pruning=1,
                                           "loc_skew": distr_popt[1],
                                           "sigma_skew": distr_popt[2]})])
         sensutils.update_results(df_key, df, json_path, orient="records")
-        pbar.update(1)
-    pbar.close()
 
 
 def correct_blocks(data_path, json_path, verbose=False, **kwargs):
@@ -350,9 +367,9 @@ def main():
 
     # Fit a bayesian regularized spline model using a skew normal likelihood
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
-                   segment_size=10000, k_min=4, k_max=40, k_pruning=2,
-                   buffer=40, nbins=50, pruning=1,
-                   verbose=True, **kwargs)
+                   segment_size=10000, k_min=4, k_max=30, k_pruning=2,
+                   buffer=40, nbins=50, pruning=3,
+                   verbose=True, n_processes=11, **kwargs)
 
 
 if __name__ == '__main__':

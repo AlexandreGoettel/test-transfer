@@ -143,7 +143,7 @@ def gaus_get_bic(x, y, order, **kwargs):
 
 def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
                                 k_min=3, k_max=30, k_pruning=1, verbose=False,
-                                plot_mean=False, kernel_size=10,
+                                plot_mean=False, kernel_size=10, disable_tqdm=False,
                                 **bic_kwargs):
     """Fit polynomials for different degrees and select the one with the highest BIC."""
     # Organise parameters
@@ -155,8 +155,8 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
     orders = np.arange(k_min, k_max+k_pruning, k_pruning)
     bics = np.zeros(len(orders), dtype=np.float64)
     best_bic, best_f_popt, best_distr_popt = -np.inf, None, None
-    for i, order in tqdm(enumerate(orders),
-                         desc="BIC..", total=k_max-k_min, position=1, leave=False):
+    for i, order in tqdm(enumerate(orders), disable=disable_tqdm,
+                         desc="BIC..", total=len(orders), position=1, leave=False):
         # Fit a polynomial
         bics[i], f_popt, distr_popt = get_bic(x, y, order, **bic_kwargs)
 
