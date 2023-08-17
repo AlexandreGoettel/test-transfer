@@ -174,7 +174,10 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
         return params[3]*skewnorm.pdf(_x, params[0], loc=params[1], scale=params[2])
 
     h0, bins = np.histogram(res, nbins)
-    _popt, _ = hist.fit_hist(fitFunc, res, bins, [alpha, mu, sigma, max(h0)])
+    try:
+        _popt, _ = hist.fit_hist(fitFunc, res, bins, [alpha, mu, sigma, max(h0)])
+    except RuntimeError:
+        return -np.inf, popt.x, [alpha, mu, sigma]
 
     if verbose:
         hist.plot_func_hist(fitFunc, _popt, res, bins)
