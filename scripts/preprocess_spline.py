@@ -213,27 +213,30 @@ def process_iteration(params):
     return i, f_popt, distr_popt
 
 
-def process_hybrid(filename, json_path, pruning=1, n_processes=1,
-                   ana_fmin=10, ana_fmax=5000, segment_size=10000,
-                   k_min=4, max_plateau=3, k_pruning=1, buffer=40, nbins=50,  # bic args
-                   verbose=False, **kwargs):
+def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
+                   ana_fmin=10, ana_fmax=5000, segment_size=10000, verbose=False,
+                   k_min=4, max_plateau=3, k_pruning=1, buffer=40, nbins=50):  # bic args
     """For now just a BIC testing area."""
-    kwargs["name"] = filename
-    pf = PeakFinder(**kwargs)
+    # Get the block-corrected noPeak data
+    with h5py.File(get_corrected_path(data_path)) as _f:
+        peak_mask = np.array(_f["peak_mask"][()], dtype=bool)
+        freq = _f["frequency"][()][~peak_mask]
+        logPSD = _f["logPSD"][()][~peak_mask]
+        del peak_mask
+
     # Get the results DataFrame
-    df_key = "splines_" + get_df_key(filename)
+    df_key = "splines_" + get_df_key(data_path)
     df = sensutils.get_results(df_key, json_path)
     if df is None:
         df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
                                    "alpha_skew", "loc_skew", "sigma_skew"])
 
     # Minimise using bic
-    idx_start = np.where(pf.freq >= ana_fmin)[0][0]
-    idx_end = np.where(pf.freq <= ana_fmax)[0][-1]
+    idx_start = np.where(freq >= ana_fmin)[0][0]
+    idx_end = np.where(freq <= ana_fmax)[0][-1]
     positions = np.concatenate([
         np.arange(idx_start, idx_end, segment_size),
         [idx_end]])
-    # pbar = tqdm(total=len(positions[:-1]), position=0, leave=True, desc="Segments")
 
     def make_args():
         kwargs = dict(get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, max_plateau=max_plateau,
@@ -244,7 +247,7 @@ def process_hybrid(filename, json_path, pruning=1, n_processes=1,
             if not (len(df) <= i or (len(df) > i and df.iloc[i].isnull().any())):
                 continue
             kwargs["disable_tqdm"] = i != len(df) + 1
-            x, y = np.log(pf.freq[start:end:pruning]), np.log(pf.psd[start:end:pruning])
+            x, y = np.log(freq[start:end:pruning]), logPSD[start:end:pruning]
             yield i, x, y, kwargs, verbose
 
     # Parallel calculation
@@ -256,9 +259,10 @@ def process_hybrid(filename, json_path, pruning=1, n_processes=1,
                 pbar.update(1)
 
     # Post-processing
+    zipped_positions = list(zip(positions[:-1], positions[1:]))
     for result in results:
         i, f_popt, distr_popt = result
-        start, end = positions[i]
+        start, end = zipped_positions[i]
 
         assert not len(f_popt) % 2
         n_knots = len(f_popt) // 2
@@ -341,7 +345,7 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
         _SEGMENT_SIZE, _CHI_LOW, _CHI_HIGH, _CUT_ALPHA,
         pruning=100, verbose=verbose
     )
-    del residuals, peak_mask
+    del residuals
 
     # Save results
     Y_corrected = np.log(pf.psd) - models.model_segment_slope(
@@ -349,6 +353,7 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     with h5py.File(corrected_path, "w") as _f:
         _f.create_dataset("logPSD", data=Y_corrected, dtype="float64")
         _f.create_dataset("frequency", data=pf.freq, dtype="float64")
+        _f.create_dataset("peak_mask", data=peak_mask, dtype="bool")
 
     df_peak = pd.DataFrame(peak_info, columns=["start_idx", "width", "max"])
     sensutils.update_results(df_name, df_peak, json_path)
@@ -369,10 +374,11 @@ def main():
     correct_blocks(data_path, json_path, **kwargs)
 
     # Fit a bayesian regularized spline model using a skew normal likelihood
+    # Used on block-corrected noPeak data
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
-                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=2,
+                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=0,
                    buffer=40, nbins=50, pruning=3,
-                   verbose=True, n_processes=11, **kwargs)
+                   verbose=False, n_processes=11)
 
 
 if __name__ == '__main__':

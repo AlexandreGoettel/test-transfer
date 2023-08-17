@@ -160,7 +160,7 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
     order = k_min
     pbar = tqdm(disable=disable_tqdm, desc="BIC..", position=1, leave=False)
     while True:
-        # Fit a polynomial
+        # Perform the fit
         bic, f_popt, distr_popt = get_bic(x, y, order, **bic_kwargs)
         bics.append(bic)
         orders.append(order)
@@ -174,10 +174,6 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
 
         # Check for early stopping
         if no_improvement_count > max_plateau:
-            break
-
-        # Check for early stopping
-        if i > 0 and bics[i] <= bics[i-1]:
             break
 
         # Loop conditions
