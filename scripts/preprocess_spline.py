@@ -215,7 +215,7 @@ def process_iteration(params):
 
 def process_hybrid(filename, json_path, pruning=1, n_processes=1,
                    ana_fmin=10, ana_fmax=5000, segment_size=10000,
-                   k_min=4, k_max=20, k_pruning=1, buffer=40, nbins=50,  # bic args
+                   k_min=4, max_plateau=3, k_pruning=1, buffer=40, nbins=50,  # bic args
                    verbose=False, **kwargs):
     """For now just a BIC testing area."""
     kwargs["name"] = filename
@@ -236,7 +236,7 @@ def process_hybrid(filename, json_path, pruning=1, n_processes=1,
     # pbar = tqdm(total=len(positions[:-1]), position=0, leave=True, desc="Segments")
 
     def make_args():
-        kwargs = dict(get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, k_max=k_max,
+        kwargs = dict(get_bic=get_bic, f_fit=get_y_spline, k_min=k_min, max_plateau=max_plateau,
                       k_pruning=k_pruning, plot_mean=True, kernel_size=800, verbose=False,
                       buffer=buffer, nbins=nbins)
         for i, (start, end) in enumerate(zip(positions[:-1], positions[1:])):
@@ -248,7 +248,7 @@ def process_hybrid(filename, json_path, pruning=1, n_processes=1,
             yield i, x, y, kwargs, verbose
 
     # Parallel calculation
-    with Pool(processes=n_processes) as pool:
+    with Pool(processes=n_processes, maxtasksperchild=10) as pool:
         results = []
         with tqdm(total=len(positions)-1-len(df), desc="Minimise BIC") as pbar:
             for result in pool.imap_unordered(process_iteration, make_args()):
@@ -370,7 +370,7 @@ def main():
 
     # Fit a bayesian regularized spline model using a skew normal likelihood
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
-                   segment_size=10000, k_min=4, k_max=30, k_pruning=2,
+                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=2,
                    buffer=40, nbins=50, pruning=3,
                    verbose=True, n_processes=11, **kwargs)
 

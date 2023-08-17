@@ -142,9 +142,9 @@ def gaus_get_bic(x, y, order, **kwargs):
 
 
 def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
-                                k_min=3, k_max=30, k_pruning=1, verbose=False,
+                                k_min=4, k_pruning=1, max_plateau=2,
                                 plot_mean=False, kernel_size=10, disable_tqdm=False,
-                                **bic_kwargs):
+                                verbose=False, **bic_kwargs):
     """Fit polynomials for different degrees and select the one with the highest BIC."""
     # Organise parameters
     # Default behaviour: fit polynomials and use gaussian likelihood
@@ -152,17 +152,39 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
     f_fit = poly if f_fit is None else f_fit
 
     # Loop over k
-    orders = np.arange(k_min, k_max+k_pruning, k_pruning)
-    bics = np.zeros(len(orders), dtype=np.float64)
+    orders, bics = [], []
     best_bic, best_f_popt, best_distr_popt = -np.inf, None, None
-    for i, order in tqdm(enumerate(orders), disable=disable_tqdm,
-                         desc="BIC..", total=len(orders), position=1, leave=False):
-        # Fit a polynomial
-        bics[i], f_popt, distr_popt = get_bic(x, y, order, **bic_kwargs)
 
-        if bics[i] > best_bic:
-            best_bic = bics[i]
+    # Loop until bic stops improving
+    i, no_improvement_count = 0, 0
+    order = k_min
+    pbar = tqdm(disable=disable_tqdm, desc="BIC..", position=1, leave=False)
+    while True:
+        # Fit a polynomial
+        bic, f_popt, distr_popt = get_bic(x, y, order, **bic_kwargs)
+        bics.append(bic)
+        orders.append(order)
+
+        if bic > best_bic:
+            best_bic = bic
             best_f_popt, best_distr_popt = f_popt, distr_popt
+            no_improvement_count = 0  # Reset the counter if there's an improvement
+        else:
+            no_improvement_count += 1  # Increment the counter if no improvement
+
+        # Check for early stopping
+        if no_improvement_count > max_plateau:
+            break
+
+        # Check for early stopping
+        if i > 0 and bics[i] <= bics[i-1]:
+            break
+
+        # Loop conditions
+        pbar.update(1)
+        i += 1
+        order += k_pruning
+    pbar.close()
 
     best_fit = f_fit(x, *best_f_popt)
     if verbose:
@@ -170,7 +192,6 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
         plt.plot(x, y, ".", label="Data", zorder=1)
         plt.plot(x, best_fit, linewidth=2.,
                  label=f"Best fit (k: {orders[np.argmax(bics)]})", zorder=3)
-        k_max = orders[~np.isinf(bics)][-1]
         if plot_mean:
             plt.plot(x, kde_smoothing(y, kernel_size), label="kde", zorder=2)
         plt.legend(loc="best")
