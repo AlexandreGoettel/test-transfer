@@ -85,6 +85,15 @@ def model_spline(cube, x_knots, shift=1, extrapolate=False, kind='linear'):
                         fill_value=np.nan, bounds_error=not extrapolate)
 
 
+def model_xy_spline(cube, extrapolate=False):
+    """Return spline where first half of cube is x_knots and rest is y_knots"""
+    assert not len(cube) % 2
+    n_knots = len(cube) // 2
+    if not isinstance(cube, np.ndarray):
+        cube = np.array(cube)
+    return CubicSpline(cube[:n_knots], cube[n_knots:], extrapolate=extrapolate)
+
+
 def model_spline_vec(cube, x_knots, shift=1):
     """Cubic spline fit to be used in log-log space."""
     N, _ = cube.shape

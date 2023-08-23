@@ -9,6 +9,20 @@ from matplotlib import pyplot as plt
 from scipy.special import erf
 from scipy.stats import norm, skew
 from scipy.signal import convolve
+from scipy.interpolate import interp1d
+
+
+def get_corrected_path(data_path):
+    """Generate path to store block-corrected results."""
+    return os.path.join(
+        os.path.split(data_path)[0],
+        "block_corrected_" + ".".join(os.path.split(data_path)[1].split(".")[:-1]) + ".hdf5"
+    )
+
+
+def get_df_key(data_path):
+    """Get a unique df name based on the LPSD output file name."""
+    return os.path.split(data_path)[-1].split(".")[-2]
 
 
 def get_skewnorm_p0(data):
@@ -68,6 +82,25 @@ def get_results(name, JSON_FILE):
     return pd.read_json(json_df)
 
 
+def del_df_from_json(dname, JSON_FILE):
+    """Delete a specific dataframe from the results file."""
+    # Check if the file exists
+    if not os.path.exists(JSON_FILE):
+        return -1
+
+    with open(JSON_FILE, 'r') as _f:
+        data = json.load(_f)
+
+    if dname in data:
+        del data[dname]
+    else:
+        return -1
+
+    # Write update to disk
+    with open(JSON_FILE, 'w') as _f:
+        json.dump(data, _f)
+
+
 def update_results(name, dataframe, JSON_FILE, orient="records"):
     """Write a dataframe to the results file."""
     data = {}
@@ -107,6 +140,14 @@ def kde_smoothing(timeseries, kernel_size):
                                         timeseries[-kernel_bound:][::-1]))
     smoothed_timeseries = convolve(padded_timeseries, kernel, mode='valid')
     return smoothed_timeseries
+
+
+def get_distr_median(x, y):
+    """Get a distribution's median using the CDF."""
+    y_norm = y / np.sum(y)
+    cdf = np.cumsum(y_norm)
+    return interp1d(cdf, x, kind="linear",
+                    bounds_error=False, fill_value=0)(0.5)
 
 
 def poly(x, *p0):
@@ -182,6 +223,7 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
         order += k_pruning
     pbar.close()
 
+    # TODO: add protection in case no fit worked?
     best_fit = f_fit(x, *best_f_popt)
     if verbose:
         # Plot results
