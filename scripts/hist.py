@@ -17,7 +17,7 @@ def log_gaus(x, A, mu, sigma):
 def reverse_log_gaus(x, A, mu, sigma, right=True):
     """
     Calculate the reverse log gausian.
-    
+
     right=True to get the value on the right side of the peak.
     Set False for the left side.
     """
@@ -46,7 +46,7 @@ def piecewise_log_gaus(x, sigma1, alpha, B, mu2, sigma2):
 def fit_hist(f, data, bins, p0=None, get_chi_sqr=False, isHist=False):
     """
     Proper chi-square fit.
-    
+
     f: function to be used in the fit.
     data: data to be histogrammed in bins (passed to np.histogram).
     p0: starting parameters for the fit. If not given std. gaus params will be applied.
@@ -55,7 +55,7 @@ def fit_hist(f, data, bins, p0=None, get_chi_sqr=False, isHist=False):
     h0, bin_edges = (data, bins) if isHist else np.histogram(data, bins)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     bin_width = bin_edges[1:] - bin_edges[:-1]
-    
+
     # First fit that ignores zero-content bins
     # If there are no zeros, jump to the second fit
     if p0 is None:  # Assume gaussian
@@ -68,7 +68,7 @@ def fit_hist(f, data, bins, p0=None, get_chi_sqr=False, isHist=False):
                     sigma=np.sqrt(zero_h0)/zero_bin_width, absolute_sigma=True)
         h0 = np.array(h0, dtype=np.float64)
         h0[m] = f(bin_centers[m], *p0) * bin_width[m]
-    
+
     # Second fit using output of previous one
     popt, pcov = fit(f, bin_centers, h0/bin_width, p0=p0,
                      sigma=np.sqrt(h0)/bin_width, absolute_sigma=True)

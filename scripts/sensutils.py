@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from scipy.special import erf
-from scipy.stats import norm, skew
+from scipy.stats import norm, skew, skewnorm
 from scipy.signal import convolve
 from scipy.interpolate import interp1d
 
@@ -56,6 +56,20 @@ def get_mode_skew(mu, sigma, alpha):
     gamma_1 = (4 - np.pi) / 2. * mu_z**3 / (1 - mu_z**2)**1.5
     m0 = mu_z - gamma_1*sigma_z/2. - np.sign(alpha)/2.*np.exp(-2*np.pi/np.abs(alpha))
     return mu + sigma*m0
+
+
+def get_two_sided_sigma(alpha, loc, sigma, CL=.68):
+    """Get two-sided sigma w.r.t. mode on skew normal."""
+    x = (1 - CL) / 2.
+    mu_lo = skewnorm.ppf(x, alpha, loc=loc, scale=sigma)
+    mu_hi = skewnorm.ppf(1 - x, alpha, loc=loc, scale=sigma)
+    mode_skew = get_mode_skew(loc, sigma, alpha)
+    return mode_skew - mu_lo, mu_hi - mode_skew
+
+
+def get_std_skew(sigma, alpha):
+    """Return standard deviation of skew normal."""
+    return sigma*np.sqrt(1 - 2/np.pi*(alpha**2 / (1 + alpha**2)))
 
 
 def logpdf_skewnorm(x, alpha, loc=0, scale=1):
@@ -157,6 +171,11 @@ def poly(x, *p0):
     for i in range(k - 1):
         output += p0[i] * x**(k - 1 - i)
     return output
+
+
+def get_eff_var(k, N):
+    """https://indico.cern.ch/event/66256/contributions/2071577/attachments/1017176/1447814/EfficiencyErrors.pdf."""
+    return (k+1)*(k+2) / ((N+2)*(N+3)) - (k+1)**2 / (N+2)**2
 
 
 def gaus_get_bic(x, y, order, **kwargs):

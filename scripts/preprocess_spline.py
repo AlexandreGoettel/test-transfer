@@ -20,19 +20,6 @@ import hist
 import models
 
 
-def get_corrected_path(data_path):
-    """Generate path to store block-corrected results."""
-    return os.path.join(
-        os.path.split(data_path)[0],
-        "block_corrected_" + ".".join(os.path.split(data_path)[1].split(".")[:-1]) + ".hdf5"
-    )
-
-
-def get_df_key(data_path):
-    """Get a unique df name based on the LPSD output file name."""
-    return os.path.split(data_path)[-1].split(".")[-2]
-
-
 def prior_uniform(cube, initial, sigma, epsilon=.05, n_sigma=3):
     """Define uniform prior around initial*(1 +- epsilon)."""
     param = cube[np.newaxis, :].copy() if cube.ndim == 1 else cube.copy()
@@ -126,11 +113,8 @@ def perform_single_fit(x, y, x_knots,
 
 
 def get_y_spline(x, *params):
-    """Apply spline model on x."""
-    assert not len(params) % 2
-    n_knots = len(params) // 2
-    params = np.array(params)
-    return CubicSpline(params[:n_knots], params[n_knots:], extrapolate=True)(x)
+    """Wrap spline model on x."""
+    return models.model_xy_spline(params, extrapolate=True)(x)
 
 
 def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
@@ -153,12 +137,12 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
 
     # 4. Minimize mean square error
     def lkl(params):
-        y_spline = get_y_spline(x, *params)
+        y_spline = models.model_xy_spline(params, extrapolate=True)(x)
         return ((y - y_spline)**2).sum()
     popt = minimize(lkl, np.concatenate([x_knots, y_knots]),
                     method="Nelder-Mead", bounds=bounds)
 
-    y_spline = get_y_spline(x, *popt.x)
+    y_spline = models.model_xy_spline(popt.x, extrapolate=True)(x)
     if verbose:
         print(popt)
         plt.plot(x, y, zorder=1)
@@ -194,6 +178,14 @@ def process_iteration(params):
     """Wrap call to bayesian_regularized_linreg in parallel."""
     i, x, y, kwargs, verbose = params
     best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(x, y, **kwargs)
+    # Calculate chi-sqr of distr fit (Poisson uncertainty available)
+    y_spline = models.model_xy_spline(f_popt, extrapolate=True)(x)
+    h0, bins = np.histogram(y - y_spline, kwargs["nbins"] if "nbins" in kwargs else 100)
+    bin_centers = (bins[1:] + bins[:-1]) / 2.
+    m = h0 != 0
+    distr = np.sum(h0)*(bins[1] - bins[0])*skewnorm.pdf(
+        bin_centers, distr_popt[0], loc=distr_popt[1], scale=distr_popt[2])
+    chi_sqr = np.sum((h0[m] - distr[m])**2 / h0[m]) / (len(h0[m]) - len(distr_popt))
     if verbose:
         prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
         fig = plt.figure(figsize=(16, 9))
@@ -210,7 +202,7 @@ def process_iteration(params):
         plt.savefig(os.path.join("log", f"{prefix}_spline.pdf"))
         plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
         plt.close()
-    return i, f_popt, distr_popt
+    return i, f_popt, distr_popt, chi_sqr
 
 
 def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
@@ -218,18 +210,18 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
                    k_min=4, max_plateau=3, k_pruning=1, buffer=40, nbins=50):  # bic args
     """For now just a BIC testing area."""
     # Get the block-corrected noPeak data
-    with h5py.File(get_corrected_path(data_path)) as _f:
+    with h5py.File(sensutils.get_corrected_path(data_path)) as _f:
         peak_mask = np.array(_f["peak_mask"][()], dtype=bool)
         freq = _f["frequency"][()][~peak_mask]
         logPSD = _f["logPSD"][()][~peak_mask]
         del peak_mask
 
     # Get the results DataFrame
-    df_key = "splines_" + get_df_key(data_path)
+    df_key = "splines_" + sensutils.get_df_key(data_path)
     df = sensutils.get_results(df_key, json_path)
     if df is None:
         df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
-                                   "alpha_skew", "loc_skew", "sigma_skew"])
+                                   "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"])
 
     # Minimise using bic
     idx_start = np.where(freq >= ana_fmin)[0][0]
@@ -248,7 +240,7 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
                 continue
             kwargs["disable_tqdm"] = i != len(df) + 1
             x, y = np.log(freq[start:end:pruning]), logPSD[start:end:pruning]
-            yield i, x, y, kwargs, verbose
+            yield i, x, y, kwargs, False
 
     # Parallel calculation
     with Pool(processes=n_processes, maxtasksperchild=10) as pool:
@@ -260,8 +252,8 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
 
     # Post-processing
     zipped_positions = list(zip(positions[:-1], positions[1:]))
-    for result in results:
-        i, f_popt, distr_popt = result
+    for result in tqdm(results, desc="Combine results"):
+        i, f_popt, distr_popt, chi_sqr = result
         start, end = zipped_positions[i]
 
         assert not len(f_popt) % 2
@@ -271,8 +263,13 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
                                           "y_knots": [list(f_popt[n_knots:])],
                                           "alpha_skew": distr_popt[0],
                                           "loc_skew": distr_popt[1],
-                                          "sigma_skew": distr_popt[2]})])
+                                          "sigma_skew": distr_popt[2],
+                                          "chi_sqr": chi_sqr})])
         sensutils.update_results(df_key, df, json_path, orient="records")
+    if verbose:
+        plt.figure()
+        plt.plot(df["chi_sqr"])
+        plt.show()
 
 
 def correct_blocks(data_path, json_path, verbose=False, **kwargs):
@@ -283,7 +280,8 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     which enables a second iteration of whitening.
     """
     # Check if corrected data is already available, if not, generate it
-    corrected_path, df_name = get_corrected_path(data_path), get_df_key(data_path)
+    corrected_path = sensutils.get_corrected_path(data_path)
+    df_name = sensutils.get_df_key(data_path)
     peak_info = sensutils.get_results(df_name, json_path)
     if os.path.exists(corrected_path) and peak_info is not None:
         return
@@ -291,7 +289,7 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     # Set variables
     kwargs["name"] = data_path
     pf = PeakFinder(**kwargs)
-    pruning = 10000
+    pruning = 1000
     buffer = 500
     _SEGMENT_SIZE = int(1e4)  # Size of chunks for skew norm fits
     _CFD_ALPHA = .05  # CFD threshold for peak zoom in fits
@@ -308,11 +306,12 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     # Fit slopes on top of spline
     popt, _ = pf.line_only_fit(x_knots, y_knots, block_positions,
                                np.zeros(len(pf.psd), dtype=bool),
-                               pruning=pruning, verbose=False)
+                               pruning=pruning, verbose=verbose)
+
     # Combined fit using previous result as initial guess
     bf, Y_model = pf.combine_spline_slope_smart(x_knots, y_knots, block_positions, popt,
                                                 np.zeros(len(pf.psd), dtype=bool),
-                                                pruning=pruning, verbose=False)
+                                                pruning=pruning, verbose=verbose)
 
     # Fit chunks with skew normals
     residuals = np.log(pf.psd) - Y_model
@@ -330,7 +329,7 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     # Final fit on peak-less data (we are fitting the background after all)
     bf, Y_model = pf.combine_spline_slope_smart(x_knots, y_knots, block_positions,
                                                 bf[3+len(x_knots):], peak_mask,
-                                                pruning=pruning, verbose=False)
+                                                pruning=pruning, verbose=verbose)
 
     # Second peak-finding iteration on cleaned data
     residuals = np.log(pf.psd) - Y_model
@@ -363,22 +362,28 @@ def main():
     """Organise analysis."""
     # TODO: rel. paths
     json_path = "data/processing_results.json"
-    data_path = "data/result_epsilon10_1243393026_1243509654_H1.txt"
+    # data_path = "data/result_epsilon10_1243393026_1243509654_H1.txt"
+    data_path = "data/result_epsilon10_1243393026_1243509654_L1.txt"
     kwargs = {"epsilon": 0.1,
               "fmin": 10,
               "fmax": 8192,
               "fs": 16384,
               "resolution": 1e-6
               }
+    # tmp - remove fit data
+    # corrected_path = sensutils.get_corrected_path(data_path)
+    # df_key = "splines_" + sensutils.get_df_key(data_path)
+    # sensutils.del_df_from_json(df_key, json_path)
+
     # Correct for block structure and find peaks based on that model
-    correct_blocks(data_path, json_path, **kwargs)
+    correct_blocks(data_path, json_path, verbose=True, **kwargs)
 
     # Fit a bayesian regularized spline model using a skew normal likelihood
     # Used on block-corrected noPeak data
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
-                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=0,
-                   buffer=40, nbins=50, pruning=3,
-                   verbose=False, n_processes=11)
+                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=2,
+                   buffer=40, nbins=75, pruning=3,
+                   verbose=True, n_processes=11)
 
 
 if __name__ == '__main__':

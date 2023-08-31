@@ -69,6 +69,9 @@ class PeakFinder:
         self.freq = self.fmin + np.cumsum(bin_width) - bin_width[0]
         self.freq = self.freq[:len(self.psd)]
 
+        # Protection against (old) LPSD bug
+        self.psd[-1] = self.psd[-2] if self.psd[-1] == 0 else self.psd[-1]
+
     def block_position_gen(self):
         """Generator for block positions."""
         j0 = 0
@@ -497,11 +500,16 @@ class PeakFinder:
             return lkl.sum()
 
         initial_guess = np.concatenate([[0, 0, 1], y_knots, popt])
-        print("Starting minimisation for combined spline+slopes fit..")
+        tqdm.write("Starting minimisation for combined spline+slopes fit..")
         popt_combined = minimize(lambda x: -lkl(x), initial_guess,
+                                #  method="Nelder-Mead", options={"maxiter": int(2e5)})
                                  method="Powell")
-        print("Done!")
-        assert popt_combined.success
+        tqdm.write("Done!")
+        try:
+            assert popt_combined.success
+        except AssertionError as e:
+            print(popt_combined)
+            raise e
         bf = popt_combined.x
 
         if verbose:
@@ -534,187 +542,3 @@ class PeakFinder:
         y_model = models.model_spline(bf, x_knots, shift=3)(X)
         y_model += models.model_segment_slope(bf, X, block_positions, shift=3+len(x_knots))
         return bf, y_model
-
-    # def combined_slope_minimize(self, peak_mask, block_positions,
-    #                             pruning, x_knots, initial_guess,
-    #                             slope_buffer=20, verbose=False):
-    #     """Full combined fit with slope-trick."""
-    #     def likelihood(cube):
-    #         return -models.likelihood_combined_skew_slope(
-    #             cube, X, Y, x_knots, block_positions, slope_buffer=slope_buffer)
-
-    #     X, Y = np.log(self.freq[~peak_mask][::pruning]), np.log(self.psd[~peak_mask][::pruning])
-    #     block_positions = self.adjust_block_positions(block_positions, ~peak_mask)
-    #     block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
-
-    #     bounds = [(None, None) for x in x_knots] +\
-    #         [(-5, 5) for pos in block_positions[:-1]]
-    #     result = minimize(likelihood, initial_guess, bounds=bounds,
-    #                       method="L-BFGS-B", options={"ftol": 1e-20})
-
-    #     if verbose:
-    #         print(result)
-    #         plt.figure()
-    #         plt.plot(X, Y)
-    #         y_model = models.model_combined_slope(
-    #             result.x, X, Y, block_positions, x_knots, buffer=slope_buffer)
-    #         plt.plot(X, y_model)
-    #     return result.x
-
-    # def sampling_slope_combined(self, peak_mask, block_positions,
-    #                             pruning=1, buffer=30,
-    #                             nlive=200, dlogz=1):
-    #     """Optimise params for different x_knots."""
-    #     X, Y = np.log(self.freq[~peak_mask][::pruning]), np.log(self.psd[~peak_mask][::pruning])
-    #     block_positions = self.adjust_block_positions(block_positions, ~peak_mask)
-    #     block_positions = np.array([pos / pruning for pos in block_positions], dtype=int)
-
-    #     # Define spline model based on block starting points
-    #     x_knots, y_knots = np.zeros(len(block_positions)-1), np.zeros(len(block_positions)-1)
-    #     for i, pos in enumerate(block_positions[:-1]):
-    #         x_knots[i] = X[pos + np.round(buffer//2)]
-    #         y_knots[i] = np.median(X[pos:pos + buffer])
-    #     mask = (X >= min(x_knots)) & (X <= max(x_knots))
-    #     X, Y = X[mask], Y[mask]
-
-    #     def lkl(cube, *_):
-    #         y_spline = CubicSpline(x_knots, y_knots, extrapolate=False)(X)
-    #         y_lines = models.model_segment_slope(cube, X, block_positions,
-    #                                              shift=1+len(x_knots))
-    #         lkl = norm.logpdf(Y - y_spline - y_lines,
-    #                           scale=cube[0])
-    #         return lkl.sum()
-
-    #     def prior(cube, *_):
-    #         lo, hi = np.zeros_like(cube), np.zeros_like(cube)
-
-    #         # Sigma
-    #         lo[0], hi[0] = 1e-2, 2
-
-    #         # Knots
-    #         epsilon = 0.01
-    #         lo[1:1+len(x_knots)] = y_knots*(1 - epsilon)
-    #         hi[1:1+len(x_knots)] = y_knots*(1 + epsilon)
-
-    #         # Slopes
-    #         lo[1+len(x_knots):] = -10
-    #         hi[1+len(x_knots):] = 10
-
-    #         return lo + (hi - lo) * cube.copy()
-
-    #     # Run UltraNest
-    #     parameters = [r"$\sigma$"] + [f'$k_{i}$' for i in range(len(x_knots))] +\
-    #         [f'$a_{i}' for i in range(len(block_positions) - 1)]
-
-    #     sampler = ultranest.ReactiveNestedSampler(
-    #         parameters, lkl, prior,
-    #         resume="overwrite", log_dir="log/search"
-    #     )
-    #     sampler.stepsampler = ultranest.stepsampler.SliceSampler(
-    #         nsteps=2*len(parameters),
-    #         generate_direction=ultranest.stepsampler.generate_mixture_random_direction
-    #     )
-    #     results = sampler.run(
-    #         min_num_live_points=nlive,
-    #         dlogz=dlogz,
-    #         viz_callback=False
-    #     )
-    #     # evidence = results["logz"]
-    #     bf = results["maximum_likelihood"]["point"]
-
-    #     # Plot progress
-    #     plt.figure()
-    #     y_spline = CubicSpline(x_knots, bf[1:1+len(x_knots)])(X)
-    #     y_slopes = models.model_segment_line(bf, X, block_positions,
-    #                                          shift=1+len(x_knots))
-    #     y_model = y_spline + y_slopes
-    #     print(f"STD COMPARISON: {bf[0]:.1e}, {np.std(Y - y_model, ddof=1):.1e}")
-    #     plt.plot(X, Y, zorder=1)
-    #     plt.plot(X, y_model, zorder=3)
-    #     plt.plot(X, y_spline, zorder=2)
-    #     # plt.scatter(x_knots, bf[:len(x_knots)], color="r", zorder=4)
-    #     plt.show()
-
-    # def optimise_x_on_block_zero(self, block_positions,
-    #                              buffer=30, k_init=4, nlive=64, dlogz=.5):
-    #     """Take starting positions of blocks and optimise x_knots on those."""
-    #     X, Y = np.zeros(len(block_positions)-1), np.zeros(len(block_positions)-1)
-    #     for i, pos in enumerate(block_positions[:-1]):
-    #         X[i] = np.log(self.freq[pos + np.round(buffer//2)])
-    #         Y[i] = np.log(np.median(self.psd[pos:pos + buffer]))
-
-    #     def perform_fit(knots):
-    #         def likelihood(cube, *_):
-    #             y_model = CubicSpline(knots, cube[1:], extrapolate=False)(X)
-    #             lkl = norm.logpdf(Y - y_model,
-    #                             scale=cube[0])
-    #             return lkl.sum()
-
-    #         def prior(cube, *_):
-    #             param = cube.copy()
-    #             lo, hi = [1e-4], [10]
-    #             lo += [min(Y) for x in knots]
-    #             hi += [max(Y) for x in knots]
-
-    #             lo, hi = np.array(lo), np.array(hi)
-    #             return lo + (hi - lo) * param
-
-    #         parameters = [r"\sigma"] + [f"k_{i}" for i in range(len(knots))]
-    #         sampler = ultranest.ReactiveNestedSampler(
-    #             parameters, likelihood, prior,
-    #             resume="overwrite", log_dir="log/search"
-    #         )
-    #         results = sampler.run(
-    #             min_num_live_points=nlive,
-    #             dlogz=dlogz,
-    #             viz_callback=False
-    #         )
-    #         return results["logz"], results["maximum_likelihood"]["point"]
-
-    #     def do_plot(knots, params, ev=None):
-    #         y_model = CubicSpline(knots, params[1:])(X)
-    #         plt.plot(X, Y, marker="o", label="Data")
-    #         plt.scatter(knots, params[1:], color="r", label="knots")
-    #         plt.plot(X, y_model, label="model")
-    #         plt.legend(loc="upper right")
-    #         plt.title(ev)
-    #         plt.show()
-
-    #     x_knots = np.linspace(X[0], X[-1], k_init)
-    #     evidence, bf = perform_fit(x_knots)
-    #     do_plot(x_knots, bf, ev=evidence)
-    #     new_ev = -np.inf
-    #     while True:
-    #         # Delete knot?
-    #         ev = np.zeros(len(x_knots) - 2)
-    #         for i, idx in enumerate(trange(1, len(x_knots)-1,
-    #                                     desc="Delete?")):
-    #             _x_knots = np.delete(x_knots, idx)
-    #             ev[i], _ = perform_fit(_x_knots)
-    #         idx_del = np.argmax(ev)
-    #         new_ev = ev[idx_del]
-
-    #         # Create knot?
-    #         ev = np.zeros(len(x_knots) - 1)
-    #         for i, idx in enumerate(trange(len(x_knots) - 1, desc="Create?")):
-    #             _x_knots = np.insert(x_knots, idx+1, np.mean(x_knots[idx:idx+2]))
-    #             ev[i], _ = perform_fit(_x_knots)
-
-    #         # Book-keeping
-    #         idx_crt = np.argmax(ev)
-    #         if ev[idx_crt] > new_ev:
-    #             new_ev = ev[idx_crt]
-
-    #         if new_ev <= evidence + dlogz:  # Has to exceed threshold
-    #             print(f"k: {len(x_knots)}\nNew ev: {new_ev:.1f}\nOld ev: {evidence:.1f}\nExiting..")
-    #             break
-    #         elif new_ev == ev[idx_crt]:
-    #             x_knots = np.insert(x_knots, idx_crt+1, np.mean(x_knots[idx_crt:idx_crt+2]))
-    #         else:
-    #             x_knots = np.delete(x_knots, idx_del + 1)
-
-    #         # Loop condition
-    #         evidence, bf = perform_fit(x_knots)
-    #         do_plot(x_knots, bf, ev=evidence)
-    #         if len(x_knots) == 2:
-    #             break
