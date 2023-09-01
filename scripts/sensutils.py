@@ -48,7 +48,8 @@ def get_skewnorm_p0(data):
 
     return alpha, mu, sigma
 
-def get_mode_skew(mu, sigma, alpha):
+
+def get_mode_skew(alpha, mu, sigma):
     """Return (wikipedia) numerical approximation of mode."""
     delta = alpha / np.sqrt(1 + alpha**2)
     mu_z = np.sqrt(2 / np.pi) * delta
@@ -63,7 +64,7 @@ def get_two_sided_sigma(alpha, loc, sigma, CL=.68):
     x = (1 - CL) / 2.
     mu_lo = skewnorm.ppf(x, alpha, loc=loc, scale=sigma)
     mu_hi = skewnorm.ppf(1 - x, alpha, loc=loc, scale=sigma)
-    mode_skew = get_mode_skew(loc, sigma, alpha)
+    mode_skew = get_mode_skew(alpha, loc, sigma)
     return mode_skew - mu_lo, mu_hi - mode_skew
 
 

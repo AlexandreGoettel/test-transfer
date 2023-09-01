@@ -3,6 +3,7 @@ from multiprocessing import Pool
 from tqdm import tqdm, trange
 import h5py
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from scipy import constants
 from scipy.optimize import minimize
@@ -17,6 +18,26 @@ import hist
 
 # Global constant for peak normalisation in likelihood calculation
 rho_local = 0.4 / (constants.hbar / constants.e * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
+
+
+def parse_ifo(name):
+    """Get ifo from data path."""
+    return name.split(".")[-2].split("/")[-1].split("_")[-1]
+
+
+def binary_search(arr, value):
+    """Perform a binary search to find left-side bounds on value."""
+    lo, hi = 0, len(arr) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        mid_val = arr[mid]
+        if mid_val < value:
+            lo = mid + 1
+        elif mid_val > value:
+            hi = mid - 1
+        else:
+            return mid
+    return lo
 
 
 def f_q_mu_tilda(q_mu, mu, mu_prime, sigma):
@@ -104,29 +125,78 @@ def profile_calc(Y, bkg, alpha_skew, loc_skew, sigma_skew,
     return popt
 
 
-def get_upper_limits_approx(X, Y, peak_norm, model_args,
-                            alpha_CL=.95):
+def get_upper_limits_approx(Y, bkg, peak_norm, model_args, alpha_CL=.95):
     """Calculate an upper limit based on asymptotic formulae"""
-    # Bkg model was already optimised
-    # So take popt from model_args to get Lambda
-    # Just need mu_hat as free parameter
-    x_knots, y_knots, alpha_skew, loc_skew, sigma_skew = model_args
-    bkg = models.model_xy_spline(np.concatenate([x_knots, y_knots]), extrapolate=True)(X)
+    # Bkg model was already optimised, so take popt from model_args to get Lambda
+    # Just need mu as free parameter
+    def log_lkl(param):
+        residuals = Y - np.log(np.exp(bkg) - peak_norm*param)
+        lkl = [sensutils.logpdf_skewnorm(res, alpha, loc, omega)
+               for res, [alpha, loc, omega] in zip(residuals, model_args)]
+        return np.sum(lkl)
 
     # Get mu_hat / sigma from maximum likelihood
+    # Starting param from first data point
     # Remember: mu = Lambda_i^-2, and mu_hat can be negative (but not mu_upper)
-    mode_skew = sensutils.get_mode_skew(loc_skew, sigma_skew, alpha_skew)
-    mu_hat = (np.exp(Y - mode_skew) - np.exp(bkg))
-    # TODO: Use MC to extend to several segments
-    sigma_lo, sigma_hi = sensutils.get_two_sided_sigma(alpha_skew, loc_skew, sigma_skew)
-    sigma_lo *= np.exp(Y - mode_skew)
-    sigma_hi *= np.exp(Y - mode_skew)
+    mode_skew = sensutils.get_mode_skew(*model_args[0, :])
+    initial_guess = (np.exp(Y[0] - mode_skew) - np.exp(bkg[0])) / peak_norm[0]
+    # Nan-protection for initial guess
+    if np.isnan(log_lkl(initial_guess)) or np.isinf(log_lkl(initial_guess)):
+        x = np.sign(initial_guess)*np.logspace(-40, -30, 100)
+        y = np.array([log_lkl(xi) for xi in x])
+        mask = (np.isnan(y) == 1) ^ (np.isinf(y) == 1)
+        if not np.sum(~mask):
+            x = -x
+            y = np.array([log_lkl(xi) for xi in x])
+            mask = (np.isnan(y) == 1) ^ (np.isinf(y) == 1)
+            tqdm.write("FAILED ITER")
+            if not np.sum(~mask):
+                return np.nan, np.nan
+        # initial_guess = x[~mask][np.argmin(x[~mask] - initial_guess)]
+        initial_guess = x[~mask][np.argmax(y[~mask])]
+    popt = minimize(lambda x: -log_lkl(x), initial_guess,
+                    method="Nelder-Mead", tol=1e-10)
+    assert popt.success
+
+    if popt.fun > 10:
+        return np.nan, np.nan
+
+    # Calculate sigma using log lkl shape
+    max_lkl = log_lkl(popt.x)
+    # Estimate starting param for sigma
+    broad_initial_guess_sigma = np.std((np.exp(skewnorm.rvs(*model_args[0, :], size=1000) + bkg[0]
+                                               - mode_skew) - np.exp(bkg[0]))/peak_norm[0])
+    x = np.linspace(0, 5*broad_initial_guess_sigma, 100)
+    y = [(log_lkl(popt.x + xi) - (max_lkl - .5))**2 for xi in x]
+    initial_guess = x[np.argmin(y)]
+    # popt_lo = minimize(lambda x: (log_lkl(x) - (max_lkl - .5))**2, popt.x - .1*np.abs(popt.x),
+    #                    method="Nelder-Mead", bounds=[(None, popt.x)])
+    # sigma_lo = popt.x - popt_lo.x
+    # tqdm.write("Up")
+    popt_hi = minimize(lambda x: (log_lkl(popt.x + x) - (max_lkl - .5))**2, initial_guess,
+                       method="Nelder-Mead", bounds=[(0, None)])
+    # tqdm.write("Lo")
+    sigma_hi = popt_hi.x[0]
+    if sigma_hi == 0:
+        print("mhhhhhh")
+        print(popt)
+        print(popt.x, broad_initial_guess_sigma)
+        print(initial_guess)
+        print(log_lkl(popt.x+initial_guess))
+        print(popt_hi)
+        plt.plot(x, y)
+        print(y)
+        plt.show()
+        error
+    # plt.plot(x, y)
+    # plt.show()
+    # error
 
     # Calculate using cumf and full and compare
     # Careful, we calculate on mu, and convert to Lambda later
     def opt_pval(param, _sigma):
         # Find the median of f_q_mu_0
-        q_mu = np.linspace(0, max(25, (param/_sigma)**2+1), 1000)  # TODO: maybe adaptive?
+        q_mu = np.linspace(0, max(25, (param/_sigma)**2+1), 1000)
         F_q_mu_0 = cumf_q_mu(q_mu, param, 0, _sigma)
         med_idx = np.where(F_q_mu_0 >= .5)[0][0]
 
@@ -135,9 +205,14 @@ def get_upper_limits_approx(X, Y, peak_norm, model_args,
         return (p_val - (1 - alpha_CL))**2
 
     # popt = profile_calc(Y, bkg, alpha_skew, loc_skew, sigma_skew, alpha_CL)
-    popt_hi = minimize(opt_pval, sigma_hi, args=(sigma_hi,),
+    popt_up = minimize(opt_pval, sigma_hi, args=(sigma_hi,),
                        bounds=[(0, None)], method="Nelder-Mead", tol=1e-10)
-    upper_lim, uncertainty = popt_hi.x, sigma_hi
+    if np.sqrt(popt_up.x) < 1e-20:
+        print(popt)
+        print(popt_hi)
+        print(popt_up)
+        error
+    upper_lim, uncertainty = popt_up.x, sigma_hi
     # popt_lo = minimize(opt_pval, sigma_lo, args=(sigma_lo,),
     #                    bounds=[(0, None)], method="Nelder-Mead", tol=1e-10)
     # print(mu_hat, sigma_lo, sigma_hi)
@@ -159,93 +234,114 @@ def get_upper_limits_approx(X, Y, peak_norm, model_args,
     # error
 
     # Convert back to Lambda_i^-1
-    upper_Lambda = np.sqrt(upper_lim / peak_norm)
-    sigma_Lambda = uncertainty / (peak_norm*2*upper_Lambda)
+    upper_Lambda = np.sqrt(upper_lim)
+    sigma_Lambda = uncertainty / (2 * upper_Lambda)
     return upper_Lambda, sigma_Lambda
 
 
 def process_segment(args):
     """Calculate an upper limit - wrapper for multiprocessing."""
-    i, freq, logPSD, fi, lo, peak_norm, model_args, alpha_CL = args
-    return i, lo+fi, get_upper_limits_approx(freq, logPSD, peak_norm,
-                                             model_args, alpha_CL=alpha_CL)
+    i, alpha_CL, freq_Hz, Y, bkg, model_args, peak_norm = args
+    return i, freq_Hz, get_upper_limits_approx(Y, bkg, peak_norm,
+                                               model_args, alpha_CL=alpha_CL)
 
 
 def main():
     """Get all necessary data and launch analysis."""
     # Analysis variables
-    n_frequencies = 3  # Test frequencies per segment (of 10k)
-    num_processes = 11
+    n_frequencies = 2000
+    num_processes = 1
     alpha_CL = 0.95
+    _MAX_CHI_SQR = 10
+    df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
 
     # TODO: rel. paths
     json_path = "data/processing_results.json"
-    data_path = "data/result_epsilon10_1243393026_1243509654_H1.txt"
+    data_paths = ["data/result_epsilon10_1243393026_1243509654_L1.txt",
+                  "data/result_epsilon10_1243393026_1243509654_H1.txt"]
     calib_path = "../shared_git_data/Calibration_factor_A_star.txt"
 
     # 0. Get A_star
     calib = np.loadtxt(calib_path, delimiter="\t")
     f_calib = {"H1": interp1d(calib[:, 1], calib[:, 0]),
                "L1": interp1d(calib[:, 1], calib[:, 0])}  # TODO: other file
-    # 0.1 Get data
-    with h5py.File(sensutils.get_corrected_path(data_path)) as _f:
-        peak_mask = np.array(_f["peak_mask"][()], dtype=bool)
-        freq = np.log(_f["frequency"][()])
-        logPSD = _f["logPSD"][()]
-    # 0.2 Get pre-processing results
-    df_key = "splines_" + sensutils.get_df_key(data_path)
-    df = sensutils.get_results(df_key, json_path)
-    assert df is not None
+    # 0.1 Open data HDFs
+    data_info = []
+    # ifos, data_hdfs = [], []
+    for data_path in data_paths:
+        _data_info = []
+        _data_info.append(h5py.File(sensutils.get_corrected_path(data_path), "r"))
+        _data_info.append(parse_ifo(data_path))
+        df_key = "splines_" + sensutils.get_df_key(data_path)
+        _data_info.append(sensutils.get_results(df_key, json_path))
+        assert _data_info[-1] is not None
+        data_info.append(_data_info)
 
-    # 1. Generate args
-    ifo = data_path.split(".")[-2].split("_")[-1]
-    jump_idx_space = np.where(~peak_mask)[0]
-    del peak_mask
+    # ###### # ###### # ###### #
+    test_frequencies = np.linspace(calib[0, 1], calib[-1, 1], n_frequencies)
     def args():
-        """Loop over segments and ifos to give data and args."""
-        # Loop over segments/ifos
         count = 0
-        for _, (frequencies, x_knots, y_knots, alpha_skew, loc_skew,
-                sigma_skew, chi_sqr) in df.iterrows():
-            [lo, hi] = jump_idx_space[frequencies]
-            freq_subset = freq[lo:hi].copy()
-            if np.exp(freq_subset[0]) < calib[0, 1] or np.exp(freq_subset[-1]) > calib[-1, 1]:
-                continue
-            logPSD_subset = logPSD[lo:hi].copy()
-            test_frequencies = map(lambda x: int(x) - lo,
-                                   np.linspace(lo, hi, n_frequencies+2)[1:-1])
+        for test_freq in test_frequencies:
+            # Variables to "fill-in" for each data segment
+            Y, bkg, model_args, peak_norm = [], [], [], []
+            for hdf_path, ifo, df in data_info:
+                # Find the df entry that contains the tested frequency
+                mask = (df['fmin'] <= test_freq) & (df['fmax'] >= test_freq)
+                # Skip this entry if test_freq is out of bounds
+                if np.sum(np.array(mask, dtype=int)) == 0:
+                    continue
+                x_knots, y_knots, alpha_skew, loc_skew, sigma_skew, chi_sqr\
+                    = df[mask][df_columns].iloc[0]
+                # Skip this entry if fit is bad
+                if chi_sqr >= _MAX_CHI_SQR:
+                    continue
 
-            # Loop over frequencies
-            for fi in test_frequencies:
-                # Calculate a normalisation constant to pass to the peak
-                # This includes calibration and conversion
-                freq_Hz = np.exp(freq_subset[fi])
+                # Find closest matching frequency
+                frequencies = hdf_path["frequency"]
+                frequency_idx = binary_search(frequencies, test_freq)
+                # Take care of edge cases
+                while frequencies[frequency_idx] < calib[0, 1]:
+                    frequency_idx += 1
+                while frequencies[frequency_idx] > calib[-1, 1]:
+                    frequency_idx -= 1
+                # frequency_idx = np.argmin(np.abs(frequencies - test_freq))
+                freq_Hz = frequencies[frequency_idx]
+
+                # Get calib factor
                 A_star_sqr = f_calib[ifo](freq_Hz)**2
-                peak_norm = rho_local / (np.pi*freq_Hz**3 * A_star_sqr
-                                         * (constants.e / constants.h)**2)
-                # These are the arguments to pass to a single computation
-                model_args = x_knots, y_knots, alpha_skew, loc_skew, sigma_skew
-                yield (count, freq_subset[fi], logPSD_subset[fi], fi, lo, peak_norm,
-                       model_args, alpha_CL)
-                count += 1
+
+                # Fill argument lists
+                Y.append(hdf_path["logPSD"][frequency_idx])
+                bkg.append(models.model_xy_spline(
+                    np.concatenate([x_knots, y_knots]), extrapolate=True)(
+                        np.log(freq_Hz)))
+                model_args.append([alpha_skew, loc_skew, sigma_skew])
+                peak_norm.append(rho_local / (np.pi*freq_Hz**3 * A_star_sqr
+                                              * (constants.e / constants.h)**2))
+            if len(Y) == 0:
+                continue
+            yield (count, alpha_CL, freq_Hz,
+                   *(np.array(x) for x in (Y, bkg, model_args, peak_norm)))
+            count += 1  # Book-keeping for results merging
 
     # 2. Create job Pool
-    n_upper_limits = len(df) * n_frequencies
     with Pool(num_processes, maxtasksperchild=10) as pool:
         results = []
-        with tqdm(total=n_upper_limits, position=0, desc="Calc. upper lim") as pbar:
+        with tqdm(total=n_frequencies, position=0, desc="Calc. upper lim") as pbar:
             for result in pool.imap_unordered(process_segment, args()):
                 results.append(result)
                 pbar.update(1)
 
     # 3. Merge results
     upper_limit_data = np.zeros((4, len(results)))
-    for i, fi, upper_limit in results:
-        upper_limit_data[0, i] = np.exp(freq[fi])
-        upper_limit_data[1:3, i] = upper_limit  # mu_upper, sigma
-        upper_limit_data[3, i] = logPSD[fi]
-    idx = np.argsort(upper_limit_data[0, :])
-    upper_limit_data = upper_limit_data[:, idx]
+    for i, freq_Hz, (upper_limit, sigma) in results:
+        upper_limit_data[0, i] = freq_Hz
+        upper_limit_data[1, i] = upper_limit  # mu_upper, sigma
+        upper_limit_data[2, i] = sigma
+
+    # Clean NaNs
+    mask = (np.isnan(upper_limit_data[1, :]) == 1) ^ (np.isnan(upper_limit_data[2, :]) == 1)
+    upper_limit_data = upper_limit_data[:, ~mask]
 
     # 4. Plot!
     def smooth_curve(y, w):
@@ -258,29 +354,15 @@ def main():
 
     plt.figure()
     ax = plt.subplot(111)
-    # ax.errorbar(upper_limit_data[0, :], smooth_lim, smooth_sigma,
-    #             fmt=".", label="LIGO", linewidth=2., color="C1")
-    # ax.errorbar(upper_limit_data[0, :], upper_limit_data[1, :], upper_limit_data[2, :],
-    #             fmt=".", label="LIGO", linewidth=2., color="C1")
     ax.plot(upper_limit_data[0, :], smooth_lim,
-            linewidth=2, color="C1", label="Sigma_hi cumf")
+            linewidth=2, color="C1", label="LIGO")
+    ax.scatter(upper_limit_data[0, :], upper_limit_data[1, :])
     ax.fill_between(upper_limit_data[0, :], smooth_lim+smooth_sigma, smooth_lim-smooth_sigma,
                     color="C1", alpha=.33)
     ax.plot(geo_data[:, 0], geo_data[:, 1], label="GEO600", linewidth=2, color="C0")
 
-    old = np.load("sigma_lo.npy")
-    smooth_old = smooth_curve(old[1, :], w)
-    smooth_sigma_old = smooth_curve(old[2, :], w)
-    ax.plot(old[0, :], smooth_old, linewidth=2, color="C2")
-    ax.fill_between(old[0, :], smooth_old+smooth_sigma_old, smooth_old-smooth_sigma_old,
-                    color="C2", alpha=.33, label="Sigma_lo cumf")
-
-    old = np.load("full.npy")
-    smooth_old = smooth_curve(old[1, :], w)
-    smooth_sigma_old = smooth_curve(old[2, :], w)
-    ax.plot(old[0, :], smooth_old, linewidth=2, color="C3")
-    ax.fill_between(old[0, :], smooth_old+smooth_sigma_old, smooth_old-smooth_sigma_old,
-                    color="C3", alpha=.33, label="Mean sigma Full")
+    # Deleteme
+    np.save("sigma_hi.npy", upper_limit_data)
 
     # Nice things
     ax.set_yscale("log")

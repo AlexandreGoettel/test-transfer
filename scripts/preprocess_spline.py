@@ -47,7 +47,7 @@ def likelihood_spline_skew(cube, x, y_data, x_knots, shift=2):
     """Define skew-normal likelihood function around spline."""
     y_model = model_spline(cube, x, x_knots, shift=shift)
     alpha, sigma = cube[:, 0], np.sqrt(np.abs(cube[:, 1]))
-    mode = sensutils.get_mode_skew(np.zeros_like(alpha), sigma, alpha)
+    mode = sensutils.get_mode_skew(alpha, np.zeros_like(alpha), sigma)
     lkl = skewnorm.logpdf((y_data - y_model).T,
                           alpha,
                           scale=sigma,
@@ -74,9 +74,7 @@ def perform_single_fit(x, y, x_knots,
     # 3. Find total initial parameters using global minimisation
     initial_guess = np.concatenate(
         [[popt[2], popt[3]], a*x_knots + b +
-         sensutils.get_mode_skew(popt[1], np.sqrt(popt[3]), popt[2])])
-    # bounds = [(-10, 10), (.1, None)]
-    # bounds += [(min(y), max(y)) for x in x_knots]
+         sensutils.get_mode_skew(popt[2], popt[1], np.sqrt(popt[3]))])
     def lkl(params):
         out = likelihood_spline_skew(params[None, :], x, y, x_knots, shift=2)
         return -out
@@ -220,7 +218,7 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
     df_key = "splines_" + sensutils.get_df_key(data_path)
     df = sensutils.get_results(df_key, json_path)
     if df is None:
-        df = pd.DataFrame(columns=["frequencies", "x_knots", "y_knots",
+        df = pd.DataFrame(columns=["fmin", "fmax", "x_knots", "y_knots",
                                    "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"])
 
     # Minimise using bic
@@ -258,13 +256,16 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
 
         assert not len(f_popt) % 2
         n_knots = len(f_popt) // 2
-        df = pd.concat([df, pd.DataFrame({"frequencies": [[start, end]],
-                                          "x_knots": [list(f_popt[:n_knots])],
-                                          "y_knots": [list(f_popt[n_knots:])],
-                                          "alpha_skew": distr_popt[0],
-                                          "loc_skew": distr_popt[1],
-                                          "sigma_skew": distr_popt[2],
-                                          "chi_sqr": chi_sqr})])
+        df = pd.concat([df, pd.DataFrame(
+            {"fmin": freq[start],
+             "fmax": freq[end],
+             "x_knots": [list(f_popt[:n_knots])],
+             "y_knots": [list(f_popt[n_knots:])],
+             "alpha_skew": distr_popt[0],
+             "loc_skew": distr_popt[1],
+             "sigma_skew": distr_popt[2],
+             "chi_sqr": chi_sqr
+             })])
         sensutils.update_results(df_key, df, json_path, orient="records")
     if verbose:
         plt.figure()
@@ -358,12 +359,10 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     sensutils.update_results(df_name, df_peak, json_path)
 
 
-def main():
+def main(data_path, verbose=False):
     """Organise analysis."""
     # TODO: rel. paths
     json_path = "data/processing_results.json"
-    # data_path = "data/result_epsilon10_1243393026_1243509654_H1.txt"
-    data_path = "data/result_epsilon10_1243393026_1243509654_L1.txt"
     kwargs = {"epsilon": 0.1,
               "fmin": 10,
               "fmax": 8192,
@@ -376,15 +375,17 @@ def main():
     # sensutils.del_df_from_json(df_key, json_path)
 
     # Correct for block structure and find peaks based on that model
-    correct_blocks(data_path, json_path, verbose=True, **kwargs)
+    correct_blocks(data_path, json_path, verbose=verbose, **kwargs)
 
     # Fit a bayesian regularized spline model using a skew normal likelihood
     # Used on block-corrected noPeak data
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
                    segment_size=10000, k_min=4, k_pruning=2, max_plateau=2,
                    buffer=40, nbins=75, pruning=3,
-                   verbose=True, n_processes=11)
+                   verbose=verbose, n_processes=11)
 
 
 if __name__ == '__main__':
-    main()
+    for path in ["data/result_epsilon10_1243393026_1243509654_H1.txt",
+                 "data/result_epsilon10_1243393026_1243509654_L1.txt"]:
+        main(path)
