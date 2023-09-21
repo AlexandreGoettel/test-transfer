@@ -1,14 +1,16 @@
 """Calculate experimental upper limits based on real data."""
+import os
 from multiprocessing import Pool
 from tqdm import tqdm, trange
 import glob
 import h5py
+from findiff import FinDiff
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from scipy import constants
 from scipy.optimize import minimize, newton, OptimizeResult
-from scipy.stats import norm, skewnorm
+from scipy.stats import norm, skewnorm, chi2
 from scipy.interpolate import interp1d
 from scipy.special import erf
 # Project imports
@@ -25,11 +27,24 @@ warnings.filterwarnings("ignore")
 rho_local = 0.4 / (constants.hbar / constants.e * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
 
 
-def log_likelihood(param, Y, bkg, peak_norm, model_args):
+def log_likelihood(params, Y, bkg, peak_norm, model_args,
+                   calib_args=None, doCalib=False):
     """Likelihood of finding dark matter in the data!"""
-    residuals = Y - np.log(np.exp(bkg) + peak_norm*param)
-    lkl = sensutils.logpdf_skewnorm(
+    # Actual likelihood calculation
+    if doCalib:
+        mu_DM, theta = params
+        residuals = 2*np.log(theta) + Y - np.log(np.exp(bkg) + peak_norm*mu_DM)
+        gaussian_pull_term = sensutils.logpdf_skewnorm(  # skew-norm with zero skew is normal!
+            theta, 0, loc=calib_args[:, 0], scale=calib_args[:, 1])
+    else:
+        mu_DM = params
+        residuals = Y - np.log(np.exp(bkg) + peak_norm*mu_DM)
+        gaussian_pull_term = 0
+
+    skewnorm_term = sensutils.logpdf_skewnorm(
         residuals, model_args[:, 0], model_args[:, 1], model_args[:, 2])
+    lkl = skewnorm_term + gaussian_pull_term
+    # Security
     if len(lkl.shape) == 2:
         return np.sum(lkl, axis=1)
     elif len(lkl.shape) == 1:
@@ -62,7 +77,8 @@ def f_q_mu_tilda(q_mu, mu, mu_prime, sigma):
     """Asymptotic approximation to f(q_mu_tilda|mu_prime)."""
     out = 0.5 / np.sqrt(2*np.pi*q_mu)*np.exp(-0.5*(np.sqrt(q_mu) - (mu-mu_prime)/sigma)**2)
     mask = (mu/sigma)**2 >= q_mu
-    out[mask] = 0.5 / (np.sqrt(2*np.pi)*mu/sigma) * np.exp(-0.5*((q_mu[mask] - (mu**2 - 2*mu*mu_prime)/sigma**2) / (2*mu/sigma))**2)
+    out[mask] = 0.5 / (np.sqrt(2*np.pi)*mu/sigma) * np.exp(-0.5*(
+        (q_mu[mask] - (mu**2 - 2*mu*mu_prime)/sigma**2) / (2*mu/sigma))**2)
     return out
 
 
@@ -75,105 +91,107 @@ def cumf_q_mu(q_mu, mu, mu_prime, sigma):
     return out
 
 
-def profile_calc(bkg, peak_norm, model_args, x0, mu_range,
-                 alpha_CL=.95, n_q_mu=47500, tol=1e-5, no_tqdm=False):
-    """Full profile calculation."""
-    def log_lkl(param, data):
-        return log_likelihood(param, data, bkg, peak_norm, model_args)
+# TODO re-implement with extended (calib) likelihood
+# def profile_calc(bkg, peak_norm, model_args, x0, mu_range,
+#                  alpha_CL=.95, n_q_mu=47500, tol=1e-5, no_tqdm=False):
+#     """Full profile calculation."""
+#     def log_lkl(param, data):
+#         return log_likelihood(param, data, bkg, peak_norm, model_args)
 
-    # Generate a bunch of q_mus by fluctuating background
-    def get_q_mu(mu_test, data, mu_hat, max_lkl, zero_lkl, full=True):
-        q_mu = np.zeros_like(mu_hat)
-        if full:
-            mu_hat = np.zeros(data.shape[0])
-            max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
-            for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
-                              total=len(data), disable=no_tqdm):
-                popt = minimize(lambda x: -log_lkl(x, yi),
-                                mu_test/2,
-                                method="Nelder-Mead",
-                                bounds=[(0, mu_range[1])],
-                                tol=tol)
-                if not popt.success:
-                    print(mu_test/2)
-                    print(mu_range)
-                    print(popt)
-                # assert popt.success
-                mu_hat[i], max_lkl[i] = popt.x, -popt.fun
-                zero_lkl[i] = log_lkl(0, yi)
+#     # Generate a bunch of q_mus by fluctuating background
+#     def get_q_mu(mu_test, data, mu_hat, max_lkl, zero_lkl, full=True):
+#         q_mu = np.zeros_like(mu_hat)
+#         if full:
+#             mu_hat = np.zeros(data.shape[0])
+#             max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
+#             for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
+#                               total=len(data), disable=no_tqdm):
+#                 popt = minimize(lambda x: -log_lkl(x, yi),
+#                                 mu_test/2,
+#                                 method="Nelder-Mead",
+#                                 bounds=[(0, mu_range[1])],
+#                                 tol=tol)
+#                 if not popt.success:
+#                     print(mu_test/2)
+#                     print(mu_range)
+#                     print(popt)
+#                 # assert popt.success
+#                 mu_hat[i], max_lkl[i] = popt.x, -popt.fun
+#                 zero_lkl[i] = log_lkl(0, yi)
 
-        mask = mu_hat < mu_test
-        # print(mu_test, mu_hat, data[mask].shape, max_lkl[mask].shape)
-        q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - max_lkl[mask])
-        mask = mu_hat < 0
-        q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - zero_lkl[mask])
-        return q_mu
+#         mask = mu_hat < mu_test
+#         # print(mu_test, mu_hat, data[mask].shape, max_lkl[mask].shape)
+#         q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - max_lkl[mask])
+#         mask = mu_hat < 0
+#         q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - zero_lkl[mask])
+#         return q_mu
 
-    # n_q_mu_0, n_q_mu_mu = n_q_mu
-    data_mu_0 = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
-                                   size=(n_q_mu, len(bkg)))
-    full_bkg = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
-                                  size=(n_q_mu, len(bkg)))
+#     # n_q_mu_0, n_q_mu_mu = n_q_mu
+#     data_mu_0 = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
+#                                    size=(n_q_mu, len(bkg)))
+#     full_bkg = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
+#                                   size=(n_q_mu, len(bkg)))
 
-    # Get mu_hat etc. for data_mu_0 and full_bkg
-    def get_mu_hat_etc(data):
-        mu_hat = np.zeros(data.shape[0])
-        max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
-        for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
-                          total=len(data), disable=no_tqdm):
-            popt = minimize(lambda x: -log_lkl(x, yi),
-                            mu_range[1]/2,
-                            method="Nelder-Mead",
-                            bounds=[(0, mu_range[1])],
-                            tol=tol)
-            assert popt.success
-            mu_hat[i], max_lkl[i] = popt.x, -popt.fun
-            zero_lkl[i] = log_lkl(0, yi)
-        return mu_hat, max_lkl, zero_lkl
+#     # Get mu_hat etc. for data_mu_0 and full_bkg
+#     def get_mu_hat_etc(data):
+#         mu_hat = np.zeros(data.shape[0])
+#         max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
+#         for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
+#                           total=len(data), disable=no_tqdm):
+#             popt = minimize(lambda x: -log_lkl(x, yi),
+#                             mu_range[1]/2,
+#                             method="Nelder-Mead",
+#                             bounds=[(0, mu_range[1])],
+#                             tol=tol)
+#             assert popt.success
+#             mu_hat[i], max_lkl[i] = popt.x, -popt.fun
+#             zero_lkl[i] = log_lkl(0, yi)
+#         return mu_hat, max_lkl, zero_lkl
 
-    try:
-        mu_hat_0, max_lkl_0, zero_lkl_0 = get_mu_hat_etc(data_mu_0)
-        mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0 = get_mu_hat_etc(full_bkg)
-    except AssertionError:
-        return np.nan
+#     try:
+#         mu_hat_0, max_lkl_0, zero_lkl_0 = get_mu_hat_etc(data_mu_0)
+#         mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0 = get_mu_hat_etc(full_bkg)
+#     except AssertionError:
+#         return np.nan
 
-    def get_p_val(mu_test, verbose=False):
-        q_mu_0 = get_q_mu(mu_test, data_mu_0, mu_hat_0, max_lkl_0, zero_lkl_0,
-                          full=False)
-        data_mu_mu = np.log(np.exp(full_bkg) + peak_norm*mu_test)
-        q_mu_mu = get_q_mu(mu_test, data_mu_mu, mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0,
-                           full=True)
+#     def get_p_val(mu_test, verbose=False):
+#         q_mu_0 = get_q_mu(mu_test, data_mu_0, mu_hat_0, max_lkl_0, zero_lkl_0,
+#                           full=False)
+#         data_mu_mu = np.log(np.exp(full_bkg) + peak_norm*mu_test)
+#         q_mu_mu = get_q_mu(mu_test, data_mu_mu, mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0,
+#                            full=True)
 
-        # Calculate p-value
-        med_q_mu_0 = np.median(q_mu_0)
-        k = np.sum(np.array(q_mu_mu >= med_q_mu_0, dtype=int))
-        p_val, p_sigma = k / float(n_q_mu), np.sqrt(sensutils.get_eff_var(k, n_q_mu))
-        if type(mu_test) == type(np.array([])) or type(mu_test) == list:
-            mu_test = mu_test[0]
-        if verbose:
-            bins = np.linspace(0, max(q_mu_0), 100)
-            ax = hist.plot_hist(q_mu_0, bins, logy=True, label="f(q_mu|0)", density=True)
-            ax = hist.plot_hist(q_mu_mu, bins, ax=ax, label="f(q_mu|mu)", density=True)
-            ax.axvline(med_q_mu_0, linestyle="--", color="r")
-            ax.set_title(f"{mu_test:.1e}: {p_val:.3f} +- {p_sigma:.4f}")
-            plt.show()
-        return (p_val - (1 - alpha_CL))**2
+#         # Calculate p-value
+#         med_q_mu_0 = np.median(q_mu_0)
+#         k = np.sum(np.array(q_mu_mu >= med_q_mu_0, dtype=int))
+#         p_val, p_sigma = k / float(n_q_mu), np.sqrt(sensutils.get_eff_var(k, n_q_mu))
+#         if type(mu_test) == type(np.array([])) or type(mu_test) == list:
+#             mu_test = mu_test[0]
+#         if verbose:
+#             bins = np.linspace(0, max(q_mu_0), 100)
+#             ax = hist.plot_hist(q_mu_0, bins, logy=True, label="f(q_mu|0)", density=True)
+#             ax = hist.plot_hist(q_mu_mu, bins, ax=ax, label="f(q_mu|mu)", density=True)
+#             ax.axvline(med_q_mu_0, linestyle="--", color="r")
+#             ax.set_title(f"{mu_test:.1e}: {p_val:.3f} +- {p_sigma:.4f}")
+#             plt.show()
+#         return (p_val - (1 - alpha_CL))**2
 
-    # Find good starting value
-    x0 = .5*x0[0]
-    while np.allclose(get_p_val(x0), (1-alpha_CL)**2):
-        tqdm.write(f"Adjusting x0 {x0:.1e}")
-        x0 /= 2
-    # Minimize: get mu for which p-val is correct
-    popt = minimize(get_p_val, x0,
-                    bounds=[mu_range],
-                    method="Nelder-Mead",
-                    tol=1e-5)
-    # get_p_val(popt.x, verbose=True)
-    return popt
+#     # Find good starting value
+#     x0 = .5*x0[0]
+#     while np.allclose(get_p_val(x0), (1-alpha_CL)**2):
+#         tqdm.write(f"Adjusting x0 {x0:.1e}")
+#         x0 /= 2
+#     # Minimize: get mu for which p-val is correct
+#     popt = minimize(get_p_val, x0,
+#                     bounds=[mu_range],
+#                     method="Nelder-Mead",
+#                     tol=1e-5)
+#     # get_p_val(popt.x, verbose=True)
+#     return popt
 
 
 def find_leading_trailing_invalid(arr):
+    """Find the indices of the leading and trailing groups of invalid numbers in an array."""
     # Create a boolean mask where True indicates either NaN or Inf
     mask = np.isnan(arr) | np.isinf(arr)
     if not np.sum(~mask):
@@ -235,116 +253,136 @@ def get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
     return output
 
 
-def get_two_sided_uncertainty_from_loglkl(log_lkl, mu_hat, mu_ranges,
-                                          verbose=True, N=1000):
+def get_two_sided_uncertainty_from_loglkl(log_lkl, mu_hat, sigma_est,
+                                          theta_hat=None, do_calib=False, N=1000):
     """Find sigmas on log_lkl surface."""
-    # What about this:
-    # 1- Get log_lkl(x) for x in logspace of each range
-    # 2- If no minima found, skip frequency
-    # 3- If only one minimum found, use that one
-    # 5- Use results of that as seeds for scipy.minimize
-    max_lkl = log_lkl(mu_hat)
-    def f(mu):
-        return (log_lkl(mu) - (max_lkl - .5))**2
+    if do_calib:
+        max_lkl = log_lkl([mu_hat, theta_hat])
+        # Get the profile likelihood distance function
+        x = np.linspace(mu_hat - 2*sigma_est, mu_hat + 2*sigma_est, N)
+        profile_lkl = np.zeros_like(x)
+        for i, xi in enumerate(x):
+            popt = minimize(lambda theta: -log_lkl([xi, theta]), theta_hat,
+                            method="Nelder-Mead", tol=1e-10, bounds=[(0.75, 1.25)])
+            profile_lkl[i] = -2*(-popt.fun - max_lkl)
+        y = (profile_lkl - min(profile_lkl) - chi2.ppf(0.68, df=1))**2
+        f = interp1d(x, y, bounds_error=True)
 
-    minima = []
-    for j, (xmin, xmax) in enumerate(mu_ranges):
-        sign = np.sign(xmin)
-        x = sign*np.logspace(np.log10(sign*xmin), np.log10(sign*xmax), N)
-        y = [f(xi) for xi in x]
-
-        for i, val in enumerate(y):
-            if i == 0 or i == len(y) - 1:
-                continue
-            if y[i-1] > val and y[i+1] > val:
-                minima += [(x[i], j)]
-
-    if not minima or len(minima) > 2:
-        return None, None
-
-    sigmas = np.zeros(len(minima))
-    for i, (mu, j) in enumerate(minima):
-        if mu < mu_hat:
-            bound = [(mu_ranges[j][0], mu_hat)]
-        else:
-            bound = [(mu_hat, mu_ranges[j][1])]
-
-        popt = minimize(f, mu, tol=1e-10,
-                        method="Nelder-Mead", bounds=bound)
-        assert popt.success
-        sigmas[i] = popt.x
-
-    # Convert positions to distances
-    sigmas = np.sort(sigmas)
-    if len(sigmas) == 1:
-        if sigmas[0] < mu_hat:
-            sigma_lo, sigma_hi = mu_hat - sigmas[0], None
-        else:
-            sigma_lo, sigma_hi = None, sigmas[0] - mu_hat
     else:
-        sigma_lo, sigma_hi = mu_hat - sigmas[0], sigmas[1] - mu_hat
+        max_lkl = log_lkl(mu_hat)
+        # Get the profile likelihood distance function
+        x = np.linspace(mu_hat - 2*sigma_est, mu_hat + 2*sigma_est, N)
+        profile_lkl = -2*(log_lkl(x) - max_lkl)
+        _min = min(profile_lkl)
+        def f(xi):
+            return (-2*(log_lkl(xi) - max_lkl) - _min - chi2.ppf(0.68, df=1))**2
 
-    if verbose and len(sigmas) == 2:
-        x = np.linspace(mu_hat - sigma_lo*1.2, mu_hat + 1.2*sigma_hi, 1000)
-        ax = plt.subplot(111)
-        ax.set_yscale("log")
-        ax.plot(x, np.array([f(xi) for xi in x]))
-        ax.axvline(mu_hat, linestyle="--", color="r")
-        ax.axvline(mu_hat-sigma_lo, linestyle="--", color="r")
-        ax.axvline(mu_hat+sigma_hi, linestyle="--", color="r")
-        ax2 = ax.twinx()
-        ax2.plot(x, np.array([log_lkl(xi) for xi in x]), color="C1")
-        plt.show()
-
+    # Get min pos on both sides from interpolated function
+    popt_hi = minimize(f, mu_hat + sigma_est,
+                       method="Nelder-Mead", tol=1e-10, bounds=[(mu_hat, None)])
+    popt_lo = minimize(f, mu_hat - sigma_est,
+                       method="Nelder-Mead", tol=1e-10, bounds=[(None, mu_hat)])
+    assert popt_hi.success and popt_lo.success
+    sigma_lo = abs(popt_lo.x - mu_hat)
+    sigma_hi = abs(popt_hi.x - mu_hat)
     return sigma_lo, sigma_hi
 
 
-def get_upper_limits_approx(Y, bkg, peak_norm, model_args, alpha_CL=.95):
+def get_upper_limits_approx(Y, bkg, peak_norm, model_args, calib_args,
+                            do_calib=False, use_sigma="Fisher", alpha_CL=.95, tol=1e-10):
     """Calculate an upper limit based on asymptotic formulae"""
     # Bkg model was already optimised, so take popt from model_args to get Lambda
-    # Just need mu as free parameter
-    def log_lkl(param):
-        return log_likelihood(param, Y, bkg, peak_norm, model_args)
+    if do_calib:
+        def log_lkl(params):
+            return log_likelihood(params, Y, bkg, peak_norm, model_args,
+                                calib_args, doCalib=True)
+    else:
+        def log_lkl(params):
+            return log_likelihood(params[0], Y, bkg, peak_norm, model_args)
 
     # Get mu_hat / sigma from maximum likelihood
     # Start by checking mu validity range for each segment
     valid_mu_ranges = get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
-                                          start=-40, end=-30, n=1000)
+                                          start=-43, end=-33, n=1000)
     # Skip frequency entirely if no common range can be found for mu
-    # TODO Instead, maybe just drop "worst" segment?
+    # TODO If necessary - instead just drop "worst" segment?
     if not valid_mu_ranges:
         return np.nan, np.nan
 
     # Now maximise lkl over all valid ranges and use best one
-    max_lkls = np.zeros((len(valid_mu_ranges), 2))
+    max_lkls = np.zeros((len(valid_mu_ranges), 3))
     for i, mu_range in enumerate(valid_mu_ranges):
-        # Get mu_guess from range and minimize
-        mus = np.linspace(mu_range[0], mu_range[1], 100)
-        lkl_values = np.array([log_lkl(xi) for xi in mus])
-        popt = minimize(lambda x: -log_lkl(x), mus[np.argmax(lkl_values)],
-                        method="Nelder-Mead", tol=1e-10,
-                        bounds=[(mu_range[0], mu_range[1])])
-        assert popt.success
-        max_lkls[i, :] = -popt.fun, popt.x
+        # Get initial guess from valid range
+        mus = np.sign(mu_range[0])*np.logspace(np.log10(abs(min(mu_range))),
+                                               np.log10(abs(max(mu_range))),
+                                               20)
+        max_lkl, max_x = -np.inf, [np.nan, np.nan]
+        for mu in mus:
+            if do_calib:
+                popt = minimize(lambda x: -log_lkl(x),
+                                [mu, 1],  # starting guess for eta_R is 1
+                                method="Nelder-Mead",
+                                tol=tol,
+                                bounds=[(min(mu_range), max(mu_range)), (.75, 1.33)])
+            else:
+                popt = minimize(lambda x: -log_lkl(x),
+                                mu,
+                                method="Nelder-Mead",
+                                tol=tol,
+                                bounds=[(min(mu_range), max(mu_range))])
+            if not popt.success:
+                continue
+            if -popt.fun != 0 and not np.isnan(-popt.fun) and not np.isinf(-popt.fun)\
+                    and -popt.fun > max_lkl:
+                max_lkl, max_x = -popt.fun, popt.x
+
+        # Book keeping
+        max_lkls[i, :len(max_x)+1] = max_lkl, *max_x
     mu_hat = max_lkls[np.argmax(max_lkls[:, 0]), 1]
+    theta_hat = max_lkls[np.argmax(max_lkls[:, 0]), 2]  # this is zero if do_calib is False
 
     # Calculate sigma using log lkl shape
-    sigma_lo, sigma_hi = get_two_sided_uncertainty_from_loglkl(
-        log_lkl, mu_hat, valid_mu_ranges, verbose=False)
-
-    # What sigma do we use?
-    sigma_lo = None if not sigma_lo else sigma_lo
-    sigma_hi = None if not sigma_hi else sigma_hi
-    if sigma_lo is None and sigma_hi is None:
-        return np.nan, np.nan
-    elif sigma_lo is None and sigma_hi is not None:
-        sigma = sigma_hi
-    elif sigma_lo is not None and sigma_hi is None:
-        sigma = sigma_lo
+    # Base initial dx estimate on distance to edge of validity
+    if mu_hat > 0:
+        max_dist = min(mu_hat - valid_mu_ranges[0][0], valid_mu_ranges[0][1] - mu_hat)
     else:
-        sigma = (sigma_lo + sigma_hi) / 2.
+        max_dist = min(mu_hat - valid_mu_ranges[1][0], valid_mu_ranges[1][1] - mu_hat)
+    # Make sure that mu_hat is in an actual maximum
+    if log_lkl([mu_hat - max_dist, theta_hat]) >= max(max_lkls[:, 0]) or\
+        log_lkl([mu_hat + max_dist, theta_hat]) >= max(max_lkls[:, 0]) or\
+            np.isinf(log_lkl([mu_hat - abs(mu_hat)*0.0001, theta_hat])):
+        return np.nan, np.nan
+    try:
+        sigma = sensutils.sigma_at_point(lambda x: log_lkl([x, theta_hat]),
+                                         mu_hat,
+                                         initial_dx=min(max_dist/2., abs(mu_hat)),
+                                         tolerance=1e-4)
+    except ValueError:
+        return np.nan, np.nan
 
-    # Careful, we calculate mu, and convert to Lambda later
+    if use_sigma != "Fisher":
+        sigma_lo, sigma_hi = get_two_sided_uncertainty_from_loglkl(
+            log_lkl, mu_hat, sigma,
+            do_calib=True, theta_hat=theta_hat, N=1000)
+
+    if use_sigma == "mean":
+        if None in [sigma_lo, sigma_hi]:
+            sigma = sigma_lo if sigma_hi is None else sigma_hi
+        else:
+            sigma = np.mean([sigma_lo, sigma_hi])
+
+    elif use_sigma == "lower":  # Use the sigma on the zero side, relevant for upper lim!
+        if None in [sigma_lo, sigma_hi]:
+            sigma = sigma_lo if sigma_hi is None else sigma_hi
+        elif mu_hat < 0:
+            sigma = sigma_hi
+        else:
+            sigma = sigma_lo
+
+    elif use_sigma != "Fisher":
+        raise ValueError(f"Unknown value for 'use_sigma': '{use_sigma}'...")
+
+    # Careful, we calculate the limit on mu, and convert to Lambda later
     def opt_pval(param, _sigma):
         # Find the median of f_q_mu_0
         q_mu = np.linspace(0, max(25, (param/_sigma)**2+1), 1000)
@@ -358,22 +396,11 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, alpha_CL=.95):
     # Calculate upper limit using cumf method
     try:
         popt_up = minimize(opt_pval, sigma, args=(sigma,),
-                           bounds=[(0, None)], method="Nelder-Mead", tol=1e-10)
-    except IndexError as err:
-        print(mu_hat)
-        print(valid_mu_ranges)
-        print(sigma)
-        get_two_sided_uncertainty_from_loglkl(
-            log_lkl, mu_hat, valid_mu_ranges, verbose=True)
-        raise err
+                        bounds=[(0, None)], method="Nelder-Mead", tol=tol)
+    except IndexError as e:
+        tqdm.write(f"{sigma:.1e}")
+        raise e
     upper_lim, uncertainty = popt_up.x, sigma
-
-    # Use previous results as seeds for full calculation
-    # popt_profile = profile_calc(bkg, peak_norm, model_args, upper_lim, valid_mu_ranges[0],
-    #                             alpha_CL=alpha_CL, n_q_mu=10000, no_tqdm=True)
-    # if not isinstance(popt_profile, OptimizeResult)  or not popt_profile.success:
-    #     return np.nan, np.nan
-    # upper_lim, uncertainty = popt_profile.x, sigma
 
     # Convert back to Lambda_i^-1
     upper_Lambda = np.sqrt(upper_lim)
@@ -383,62 +410,78 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, alpha_CL=.95):
 
 def process_segment(args):
     """Calculate an upper limit - wrapper for multiprocessing."""
-    i, alpha_CL, freq_Hz, Y, bkg, model_args, peak_norm = args
-    return i, freq_Hz, get_upper_limits_approx(Y, bkg, peak_norm,
-                                               model_args, alpha_CL=alpha_CL)
+    i, alpha_CL, freq_Hz, do_calib, Y, bkg, model_args, peak_norm, calib_args = args
+    return i, freq_Hz, get_upper_limits_approx(Y, bkg, peak_norm, model_args,
+                                               calib_args, do_calib=do_calib, alpha_CL=alpha_CL)
 
 
 def main():
     """Get all necessary data and launch analysis."""
+    # TODO: Add option to disable calibration
     # Analysis variables
     n_frequencies = 2000
     num_processes = 11
     alpha_CL = 0.95
     _MAX_CHI_SQR = 10
+    do_calib = True
     df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
 
     # TODO: rel. paths
     json_path = "data/processing_results.json"
-    data_paths = ["data/result_epsilon10_1243393026_1243509654_H1.txt",
-                  "data/result_epsilon10_1243393026_1243509654_L1.txt",
-                  "data/result_epsilon10_1260438984_1260540984_L1.txt",
-                  "data/result_epsilon10_1244106426_1244208890_H1.txt",
-                  "data/result_epsilon10_1261705825_1261828599_H1.txt",
-                  "data/result_epsilon10_1244106426_1244208890_L1.txt",
-                  "data/result_epsilon10_1261705825_1261828599_L1.txt",
-                  "data/result_epsilon10_1258629613_1258749121_H1.txt",
-                  "data/result_epsilon10_1266964917_1267140541_H1.txt",
-                  "data/result_epsilon10_1258629613_1258749121_L1.txt",
-                  "data/result_epsilon10_1266964917_1267140541_L1.txt",
-                  "data/result_epsilon10_1260438984_1260540984_H1.txt"]
-    for data_path in glob.glob("data/*.lpsd"):
+    data_paths = []
+    for data_path in glob.glob("data/result_epsilon10*"):
         data_paths.append(data_path)
-    calib_path = "../shared_git_data/Calibration_factor_A_star.txt"
+    # data_paths = ["data/result_epsilon10_1239824770_1239926064_L1.lpsd",
+    #               "data/result_epsilon10_1240305825_1240473003_L1.lpsd"]
+    transfer_function_path = "../shared_git_data/Calibration_factor_A_star.txt"
+    calib_dir = "data/calibration"
 
     # 0. Get A_star
-    calib = np.loadtxt(calib_path, delimiter="\t")
-    f_calib = {"H1": interp1d(calib[:, 1], calib[:, 0]),
-               "L1": interp1d(calib[:, 1], calib[:, 0])}  # TODO: other file
-    # 0.1 Open data HDFs
+    tf = np.loadtxt(transfer_function_path, delimiter="\t")
+    f_A_star = {"H1": interp1d(tf[:, 1], tf[:, 0]),
+                "L1": interp1d(tf[:, 1], tf[:, 0])}  # TODO: other file
+    # 0.1 Open O3a and O3b calibration envelope files
+    calib_gps_times = {
+        "H1": [int(f.split("_")[4]) for f in glob.glob(os.path.join(
+            calib_dir, "H1", "*FinalResults.txt"))],
+        "L1": [int(f.split("_")[4]) for f in glob.glob(os.path.join(
+            calib_dir, "L1", "*FinalResults.txt"))]
+    }
+    # 0.2 Open data HDFs
     data_info = []
-    # ifos, data_hdfs = [], []
-    for data_path in data_paths:
+    for data_path in tqdm(data_paths, desc="Opening HDFs", leave=False):
         _data_info = []
         _data_info.append(h5py.File(sensutils.get_corrected_path(data_path), "r"))
-        _data_info.append(parse_ifo(data_path))
+        ifo = parse_ifo(data_path)
+        _data_info.append(ifo)
         df_key = "splines_" + sensutils.get_df_key(data_path)
         _data_info.append(sensutils.get_results(df_key, json_path))
         assert _data_info[-1] is not None
+        # Calibration - Get closest calib GPS time and read out
+        data_gps_time = int(os.path.split(data_path)[-1].split("_")[-3])
+        nearest_calib_time = calib_gps_times[ifo][np.argmin(np.abs(
+            np.array(calib_gps_times[ifo]) - data_gps_time))]
+        calib_file = glob.glob(os.path.join(calib_dir, ifo,
+                                            f"*{nearest_calib_time}*FinalResults.txt"))[0]
+        data = np.loadtxt(calib_file)
+        # Assume gaussian error
+        freq, mag, mag_1sigma = data[:, 0], data[:, 1], data[:, 5]
+        # print(np.max(mag+mag_1sigma), data[np.argmax(mag+mag_1sigma), 0])
+        # assert np.max(mag+mag_1sigma) < 1.33
+        f_calib_mag = interp1d(freq, mag, bounds_error=False)
+        f_calib_sigma = interp1d(freq, np.abs(mag_1sigma - mag), bounds_error=False)
+        # "Return"
+        _data_info.append((f_calib_mag, f_calib_sigma))
         data_info.append(_data_info)
 
     # ###### # ###### # ###### #
-    test_frequencies = np.logspace(np.log10(calib[0, 1]), np.log10(calib[-1, 1]), n_frequencies)
+    test_frequencies = np.logspace(np.log10(tf[0, 1]), np.log10(tf[-1, 1]), n_frequencies)
     def args():
         count = 0
         for test_freq in test_frequencies:
             # Variables to "fill-in" for each data segment
-            Y, bkg, model_args, peak_norm = [], [], [], []
-            for hdf_path, ifo, df in data_info:
+            Y, bkg, model_args, peak_norm, calib_args = [], [], [], [], []
+            for hdf_path, ifo, df, (f_calib_mag, f_calib_sigma) in data_info:
                 # Find the df entry that contains the tested frequency
                 mask = (df['fmin'] <= test_freq) & (df['fmax'] >= test_freq)
                 # Skip this entry if test_freq is out of bounds
@@ -454,15 +497,18 @@ def main():
                 frequencies = hdf_path["frequency"]
                 frequency_idx = binary_search(frequencies, test_freq)
                 # Take care of edge cases
-                while frequencies[frequency_idx] < calib[0, 1]:
+                while frequencies[frequency_idx] < tf[0, 1]:
                     frequency_idx += 1
-                while frequencies[frequency_idx] > calib[-1, 1]:
+                while frequencies[frequency_idx] > tf[-1, 1]:
                     frequency_idx -= 1
                 # frequency_idx = np.argmin(np.abs(frequencies - test_freq))
                 freq_Hz = frequencies[frequency_idx]
 
-                # Get calib factor
-                A_star_sqr = f_calib[ifo](freq_Hz)**2
+                # Get tf factor
+                A_star_sqr = f_A_star[ifo](freq_Hz)**2
+
+                # Get calibration mu and sigma
+                calib_mu, calib_sigma = f_calib_mag(freq_Hz), f_calib_sigma(freq_Hz)
 
                 # Fill argument lists
                 Y.append(hdf_path["logPSD"][frequency_idx])
@@ -472,12 +518,13 @@ def main():
                 model_args.append([alpha_skew, loc_skew, sigma_skew])
                 peak_norm.append(rho_local / (np.pi*freq_Hz**3 * A_star_sqr
                                               * (constants.e / constants.h)**2))
+                calib_args.append([calib_mu, calib_sigma])
+
             if len(Y) == 0:
                 continue
-            Y, bkg, model_args, peak_norm = list(map(np.array, [Y, bkg, model_args, peak_norm]))
-            yield (count, alpha_CL, freq_Hz,
-                   *(np.array(x) for x in (Y, bkg, model_args, peak_norm)))
-            count += 1  # Book-keeping for results merging
+            yield (count, alpha_CL, freq_Hz, do_calib,
+                   *(np.array(x) for x in (Y, bkg, model_args, peak_norm, calib_args)))
+            count += 1  # Book-keeping for results merging later
 
     # 2. Create job Pool
     results = []
@@ -511,36 +558,19 @@ def main():
     ax = plt.subplot(111)
     ax.plot(geo_data[:, 0], geo_data[:, 1], label="GEO600", linewidth=4, color="C0")
 
-    two = np.load("test.npy")
-    _smooth_lim, smooth_sigma = np.exp(smooth_curve(np.log(two[1, :]), w)), smooth_curve(two[2, :], w)
-    ax.plot(two[0, :], _smooth_lim, color="gold", label="Gold", linewidth=4.)
-    f_gold = interp1d(two[0, :], _smooth_lim, bounds_error=False)
-
-    ax.plot(upper_limit_data[0, :], smooth_lim,
-            linewidth=4, color="silver", label="Gold+Silver")
-    # ax.scatter(upper_limit_data[0, :], upper_limit_data[1, :],
-    #            alpha=.33, color="C1", s=4)
+    ax.scatter(upper_limit_data[0, :], upper_limit_data[1, :],
+               alpha=.33, color="C1", s=4)
     # ax.errorbar(upper_limit_data[0, :], upper_limit_data[1, :], upper_limit_data[2,:],
     #             color="C1", fmt=".")
-    # ax.fill_between(upper_limit_data[0, :], smooth_lim+smooth_sigma, smooth_lim-smooth_sigma,
-    #                 color="C1", alpha=.33)
-    # ax.plot(upper_limit_data[0, :], smooth_lim / np.sqrt(2), label="L1->H1+L1 Projection",
-    #         color="C3", linewidth=2.)
+    ax.fill_between(upper_limit_data[0, :], smooth_lim+smooth_sigma, smooth_lim-smooth_sigma,
+                    color="C1", alpha=.33)
+    ax.plot(upper_limit_data[0, :], smooth_lim , label="LIGO",
+            color="C1", linewidth=2.)
 
-    np.save("full_plus1k.npy", upper_limit_data)
-    # two = np.load("one_segment_H1_upper_lim.npy")
-    # _smooth_lim, _ = np.exp(smooth_curve(np.log(two[1, :]), w)), smooth_curve(two[2, :], w)
-    # ax.plot(two[0, :], _smooth_lim, color="C3", label="Initial estimate", linewidth=2.)
-
-    x = upper_limit_data[0, :]
-    y = smooth_lim/2.8*smooth_lim/(f_gold(x)/1.89)
-    mask = x > 180
-    ax.plot(x[mask], y[mask],
-            linewidth=4, color="chocolate", label="Gold+Silver+Bronze (Projected)")
-    # _smooth_lim, _ = np.exp(smooth_curve(np.log(two[1, :]), w)), smooth_curve(two[2, :], w)
-    # ax.plot(two[0, :], _smooth_lim/1.89, color="C2", label="Silver projected", linewidth=2.)
-    # ax.fill_between(two[0, :], smooth_lim+smooth_sigma, smooth_lim-smooth_sigma,
-                    # color="C2", alpha=.33)
+    np.save("silver_calib.npy", upper_limit_data)
+    two = np.load("silver_nocalib.npy")
+    _smooth_lim, _ = np.exp(smooth_curve(np.log(two[1, :]), w)), smooth_curve(two[2, :], w)
+    ax.plot(two[0, :], _smooth_lim, color="C3", label="nocalib", linewidth=2.)
 
     # Nice things
     ax.set_yscale("log")
