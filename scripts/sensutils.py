@@ -1,8 +1,10 @@
 """Collect useful common functions for the sensitivity analysis."""
 import os
+import csv
 import json
 import warnings
 from tqdm import tqdm
+from findiff import FinDiff
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -12,12 +14,69 @@ from scipy.signal import convolve
 from scipy.interpolate import interp1d
 
 
+def sigma_at_point(func, point, initial_dx=1e-5, tolerance=1e-6, max_iterations=100):
+    """
+    Compute the derivative of a function at a given point using findiff.
+
+    Parameters:
+    - func: The function to differentiate.
+    - point: The point at which to compute the derivative.
+    - initial_dx: Starting value for dx.
+    - tolerance: Tolerance for derivative stabilization.
+    - max_iterations: Maximum number of iterations to adjust dx.
+
+    Returns:
+    - Derivative estimate at the given point.
+    """
+    dx = initial_dx
+    prev_derivative = None
+    for _ in range(max_iterations):
+        # Create the differential operator for the first derivative with respect to x
+        d_dx = FinDiff(0, dx, 2)
+
+        # Compute the derivative using a small interval around the point
+        x_values = np.array([point - 2*dx, point - dx, point, point + dx, point + 2*dx])
+        y_values = np.array([func(x) for x in x_values])
+        derivative = d_dx(y_values)[2]
+
+        # Check if the derivative estimate has stabilized
+        if prev_derivative is not None and\
+                abs((derivative - prev_derivative)/prev_derivative) < tolerance:
+            return np.sqrt(-1. / derivative)
+        prev_derivative = derivative
+        dx /= 2  # Double the dx for the next iteration
+
+    raise ValueError("Failed to converge to a stable derivative estimate.")
+
+
 def get_corrected_path(data_path):
     """Generate path to store block-corrected results."""
     return os.path.join(
         os.path.split(data_path)[0],
         "block_corrected_" + ".".join(os.path.split(data_path)[1].split(".")[:-1]) + ".hdf5"
     )
+
+
+def clean_array(arr, val):
+    """Return array with all elements of arr excluding val."""
+    return [x for x in arr if x != val]
+
+
+def read_calib(file_path, delimiter=" "):
+    freq, amp, phase = [], [], []
+    with open(file_path, "r") as _f:
+        data = csv.reader(_f, delimiter=delimiter)
+        for row in data:
+            _row = clean_array(row, "")
+            try:
+                freq.append(float(_row[0]))
+                amp.append(float(_row[1]))
+                phase.append(float(_row[2]))
+            except:
+                continue
+    output = np.zeros((3, len(freq)))
+    output[0, :], output[1, :], output[2, :] = freq, amp, phase
+    return output
 
 
 def get_df_key(data_path):
