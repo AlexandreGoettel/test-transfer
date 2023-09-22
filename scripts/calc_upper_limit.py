@@ -92,102 +92,102 @@ def cumf_q_mu(q_mu, mu, mu_prime, sigma):
 
 
 # TODO re-implement with extended (calib) likelihood
-# def profile_calc(bkg, peak_norm, model_args, x0, mu_range,
-#                  alpha_CL=.95, n_q_mu=47500, tol=1e-5, no_tqdm=False):
-#     """Full profile calculation."""
-#     def log_lkl(param, data):
-#         return log_likelihood(param, data, bkg, peak_norm, model_args)
+def profile_calc(bkg, peak_norm, model_args, x0, mu_range,
+                 alpha_CL=.95, n_q_mu=47500, tol=1e-5, no_tqdm=False):
+    """Full profile calculation."""
+    def log_lkl(param, data):
+        return log_likelihood(param, data, bkg, peak_norm, model_args)
 
-#     # Generate a bunch of q_mus by fluctuating background
-#     def get_q_mu(mu_test, data, mu_hat, max_lkl, zero_lkl, full=True):
-#         q_mu = np.zeros_like(mu_hat)
-#         if full:
-#             mu_hat = np.zeros(data.shape[0])
-#             max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
-#             for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
-#                               total=len(data), disable=no_tqdm):
-#                 popt = minimize(lambda x: -log_lkl(x, yi),
-#                                 mu_test/2,
-#                                 method="Nelder-Mead",
-#                                 bounds=[(0, mu_range[1])],
-#                                 tol=tol)
-#                 if not popt.success:
-#                     print(mu_test/2)
-#                     print(mu_range)
-#                     print(popt)
-#                 # assert popt.success
-#                 mu_hat[i], max_lkl[i] = popt.x, -popt.fun
-#                 zero_lkl[i] = log_lkl(0, yi)
+    # Generate a bunch of q_mus by fluctuating background
+    def get_q_mu(mu_test, data, mu_hat, max_lkl, zero_lkl, full=True):
+        q_mu = np.zeros_like(mu_hat)
+        if full:
+            mu_hat = np.zeros(data.shape[0])
+            max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
+            for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
+                              total=len(data), disable=no_tqdm):
+                popt = minimize(lambda x: -log_lkl(x, yi),
+                                mu_test/2,
+                                method="Nelder-Mead",
+                                bounds=[(0, mu_range[1])],
+                                tol=tol)
+                if not popt.success:
+                    print(mu_test/2)
+                    print(mu_range)
+                    print(popt)
+                # assert popt.success
+                mu_hat[i], max_lkl[i] = popt.x, -popt.fun
+                zero_lkl[i] = log_lkl(0, yi)
 
-#         mask = mu_hat < mu_test
-#         # print(mu_test, mu_hat, data[mask].shape, max_lkl[mask].shape)
-#         q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - max_lkl[mask])
-#         mask = mu_hat < 0
-#         q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - zero_lkl[mask])
-#         return q_mu
+        mask = mu_hat < mu_test
+        # print(mu_test, mu_hat, data[mask].shape, max_lkl[mask].shape)
+        q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - max_lkl[mask])
+        mask = mu_hat < 0
+        q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - zero_lkl[mask])
+        return q_mu
 
-#     # n_q_mu_0, n_q_mu_mu = n_q_mu
-#     data_mu_0 = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
-#                                    size=(n_q_mu, len(bkg)))
-#     full_bkg = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
-#                                   size=(n_q_mu, len(bkg)))
+    # n_q_mu_0, n_q_mu_mu = n_q_mu
+    data_mu_0 = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
+                                   size=(n_q_mu, len(bkg)))
+    full_bkg = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
+                                  size=(n_q_mu, len(bkg)))
 
-#     # Get mu_hat etc. for data_mu_0 and full_bkg
-#     def get_mu_hat_etc(data):
-#         mu_hat = np.zeros(data.shape[0])
-#         max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
-#         for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
-#                           total=len(data), disable=no_tqdm):
-#             popt = minimize(lambda x: -log_lkl(x, yi),
-#                             mu_range[1]/2,
-#                             method="Nelder-Mead",
-#                             bounds=[(0, mu_range[1])],
-#                             tol=tol)
-#             assert popt.success
-#             mu_hat[i], max_lkl[i] = popt.x, -popt.fun
-#             zero_lkl[i] = log_lkl(0, yi)
-#         return mu_hat, max_lkl, zero_lkl
+    # Get mu_hat etc. for data_mu_0 and full_bkg
+    def get_mu_hat_etc(data):
+        mu_hat = np.zeros(data.shape[0])
+        max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
+        for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
+                          total=len(data), disable=no_tqdm):
+            popt = minimize(lambda x: -log_lkl(x, yi),
+                            mu_range[1]/2,
+                            method="Nelder-Mead",
+                            bounds=[(0, mu_range[1])],
+                            tol=tol)
+            assert popt.success
+            mu_hat[i], max_lkl[i] = popt.x, -popt.fun
+            zero_lkl[i] = log_lkl(0, yi)
+        return mu_hat, max_lkl, zero_lkl
 
-#     try:
-#         mu_hat_0, max_lkl_0, zero_lkl_0 = get_mu_hat_etc(data_mu_0)
-#         mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0 = get_mu_hat_etc(full_bkg)
-#     except AssertionError:
-#         return np.nan
+    try:
+        mu_hat_0, max_lkl_0, zero_lkl_0 = get_mu_hat_etc(data_mu_0)
+        mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0 = get_mu_hat_etc(full_bkg)
+    except AssertionError:
+        return np.nan
 
-#     def get_p_val(mu_test, verbose=False):
-#         q_mu_0 = get_q_mu(mu_test, data_mu_0, mu_hat_0, max_lkl_0, zero_lkl_0,
-#                           full=False)
-#         data_mu_mu = np.log(np.exp(full_bkg) + peak_norm*mu_test)
-#         q_mu_mu = get_q_mu(mu_test, data_mu_mu, mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0,
-#                            full=True)
+    def get_p_val(mu_test, verbose=False):
+        q_mu_0 = get_q_mu(mu_test, data_mu_0, mu_hat_0, max_lkl_0, zero_lkl_0,
+                          full=False)
+        data_mu_mu = np.log(np.exp(full_bkg) + peak_norm*mu_test)
+        q_mu_mu = get_q_mu(mu_test, data_mu_mu, mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0,
+                           full=True)
 
-#         # Calculate p-value
-#         med_q_mu_0 = np.median(q_mu_0)
-#         k = np.sum(np.array(q_mu_mu >= med_q_mu_0, dtype=int))
-#         p_val, p_sigma = k / float(n_q_mu), np.sqrt(sensutils.get_eff_var(k, n_q_mu))
-#         if type(mu_test) == type(np.array([])) or type(mu_test) == list:
-#             mu_test = mu_test[0]
-#         if verbose:
-#             bins = np.linspace(0, max(q_mu_0), 100)
-#             ax = hist.plot_hist(q_mu_0, bins, logy=True, label="f(q_mu|0)", density=True)
-#             ax = hist.plot_hist(q_mu_mu, bins, ax=ax, label="f(q_mu|mu)", density=True)
-#             ax.axvline(med_q_mu_0, linestyle="--", color="r")
-#             ax.set_title(f"{mu_test:.1e}: {p_val:.3f} +- {p_sigma:.4f}")
-#             plt.show()
-#         return (p_val - (1 - alpha_CL))**2
+        # Calculate p-value
+        med_q_mu_0 = np.median(q_mu_0)
+        k = np.sum(np.array(q_mu_mu >= med_q_mu_0, dtype=int))
+        p_val, p_sigma = k / float(n_q_mu), np.sqrt(sensutils.get_eff_var(k, n_q_mu))
+        if type(mu_test) == type(np.array([])) or type(mu_test) == list:
+            mu_test = mu_test[0]
+        if verbose:
+            bins = np.linspace(0, max(q_mu_0), 100)
+            ax = hist.plot_hist(q_mu_0, bins, logy=True, label="f(q_mu|0)", density=True)
+            ax = hist.plot_hist(q_mu_mu, bins, ax=ax, label="f(q_mu|mu)", density=True)
+            ax.axvline(med_q_mu_0, linestyle="--", color="r")
+            ax.set_title(f"{mu_test:.1e}: {p_val:.3f} +- {p_sigma:.4f}")
+            plt.show()
+        return (p_val - (1 - alpha_CL))**2
 
-#     # Find good starting value
-#     x0 = .5*x0[0]
-#     while np.allclose(get_p_val(x0), (1-alpha_CL)**2):
-#         tqdm.write(f"Adjusting x0 {x0:.1e}")
-#         x0 /= 2
-#     # Minimize: get mu for which p-val is correct
-#     popt = minimize(get_p_val, x0,
-#                     bounds=[mu_range],
-#                     method="Nelder-Mead",
-#                     tol=1e-5)
-#     # get_p_val(popt.x, verbose=True)
-#     return popt
+    # Find good starting value
+    x0 = .5*x0[0]
+    while np.allclose(get_p_val(x0), (1-alpha_CL)**2):
+        tqdm.write(f"Adjusting x0 {x0:.1e}")
+        x0 /= 2
+    # Minimize: get mu for which p-val is correct
+    popt = minimize(get_p_val, x0,
+                    bounds=[mu_range],
+                    method="Nelder-Mead",
+                    tol=1e-5)
+    # get_p_val(popt.x, verbose=True)
+    return popt
 
 
 def find_leading_trailing_invalid(arr):
@@ -253,38 +253,83 @@ def get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
     return output
 
 
-def get_two_sided_uncertainty_from_loglkl(log_lkl, mu_hat, sigma_est,
+def get_two_sided_uncertainty_from_loglkl(log_lkl, mu_hat, sigma_est, mu_ranges,
                                           theta_hat=None, do_calib=False, N=1000):
     """Find sigmas on log_lkl surface."""
+    # Get correct mu_range
+    if mu_hat > 0:
+        if mu_ranges[0][0] > 0:
+            mu_range = mu_ranges[0]
+        else:
+            mu_range = mu_ranges[1]
+    else:
+        if mu_ranges[0][0] < 0:
+            mu_range = mu_ranges[0]
+        else:
+            mu_range = mu_ranges[1]
+    # Set search bounds
+    delta_lo, delta_hi = sigma_est, sigma_est
+    if mu_hat - delta_lo < mu_range[0]:
+        delta_lo = (mu_hat - mu_range[0]) / 2.
+    if mu_hat + delta_hi > mu_range[1]:
+        delta_hi = (mu_range[1] - mu_hat) / 2.
+    assert delta_lo > 0 and delta_hi > 0
+
     if do_calib:
         max_lkl = log_lkl([mu_hat, theta_hat])
         # Get the profile likelihood distance function
-        x = np.linspace(mu_hat - 2*sigma_est, mu_hat + 2*sigma_est, N)
+        x = np.linspace(mu_hat - 2*delta_lo, mu_hat + 2*delta_hi, N)
         profile_lkl = np.zeros_like(x)
         for i, xi in enumerate(x):
             popt = minimize(lambda theta: -log_lkl([xi, theta]), theta_hat,
                             method="Nelder-Mead", tol=1e-10, bounds=[(0.75, 1.25)])
             profile_lkl[i] = -2*(-popt.fun - max_lkl)
-        y = (profile_lkl - min(profile_lkl) - chi2.ppf(0.68, df=1))**2
+        # Check if the range is ok on lower side (could use protection for upper side?)
+        if np.where(~np.isinf(profile_lkl))[0][0]:
+            delta_lo = (mu_hat - x[np.where(~np.isinf(profile_lkl))[0][0]]) / 2.
+            assert delta_lo > 0
+            x = np.linspace(mu_hat - 2*delta_lo, mu_hat + 2*delta_hi, N)
+            profile_lkl = np.array([-2*(log_lkl([xi, theta_hat]) - max_lkl) for xi in x])
+
+        y = (profile_lkl - min(profile_lkl[~np.isnan(profile_lkl)]) - chi2.ppf(0.68, df=1))**2
         f = interp1d(x, y, bounds_error=True)
 
     else:
-        max_lkl = log_lkl(mu_hat)
+        max_lkl = log_lkl([mu_hat, theta_hat])
         # Get the profile likelihood distance function
-        x = np.linspace(mu_hat - 2*sigma_est, mu_hat + 2*sigma_est, N)
-        profile_lkl = -2*(log_lkl(x) - max_lkl)
-        _min = min(profile_lkl)
+        x = np.linspace(mu_hat - 2*delta_lo, mu_hat + 2*delta_hi, N)
+        profile_lkl = np.array([-2*(log_lkl([xi, theta_hat]) - max_lkl) for xi in x])
+        # Check if the range is ok on lower side (could use protection for upper side?)
+        if np.where(~np.isinf(profile_lkl))[0][0]:
+            delta_lo = (mu_hat - x[np.where(~np.isinf(profile_lkl))[0][0]]) / 2.
+            assert delta_lo > 0
+            x = np.linspace(mu_hat - 2*delta_lo, mu_hat + 2*delta_hi, N)
+            profile_lkl = np.array([-2*(log_lkl([xi, theta_hat]) - max_lkl) for xi in x])
+
+        mask = ~np.isnan(profile_lkl)
+        _min = min(profile_lkl[mask])
         def f(xi):
-            return (-2*(log_lkl(xi) - max_lkl) - _min - chi2.ppf(0.68, df=1))**2
+            return np.log((-2*(log_lkl([xi, theta_hat]) - max_lkl) - _min - chi2.ppf(0.68, df=1))**2)
+
+    # Find initial estimates on f(x)
+    _x = x[x > mu_hat]
+    _y = np.array([f(xi) for xi in _x])
+    mask = np.isnan(_y) | np.isinf(_y)
+    delta_hi = _x[~mask][np.argmin(_y[~mask])] - mu_hat
+    # Delta_lo now
+    _x = x[x < mu_hat]
+    _y = np.array([f(xi) for xi in _x])
+    mask = np.isnan(_y) | np.isinf(_y)
+    delta_lo = mu_hat - _x[~mask][np.argmin(_y[~mask])]
 
     # Get min pos on both sides from interpolated function
-    popt_hi = minimize(f, mu_hat + sigma_est,
+    popt_hi = minimize(f, mu_hat + delta_hi,
                        method="Nelder-Mead", tol=1e-10, bounds=[(mu_hat, None)])
-    popt_lo = minimize(f, mu_hat - sigma_est,
+    popt_lo = minimize(f, mu_hat - delta_lo,
                        method="Nelder-Mead", tol=1e-10, bounds=[(None, mu_hat)])
-    assert popt_hi.success and popt_lo.success
-    sigma_lo = abs(popt_lo.x - mu_hat)
-    sigma_hi = abs(popt_hi.x - mu_hat)
+
+    sigma_lo = abs(popt_lo.x - mu_hat) if popt_lo.fun < -5 else None
+    sigma_hi = abs(popt_hi.x - mu_hat) if popt_hi.fun < -5 else None
     return sigma_lo, sigma_hi
 
 
@@ -305,7 +350,6 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, calib_args,
     valid_mu_ranges = get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
                                           start=-43, end=-33, n=1000)
     # Skip frequency entirely if no common range can be found for mu
-    # TODO If necessary - instead just drop "worst" segment?
     if not valid_mu_ranges:
         return np.nan, np.nan
 
@@ -315,7 +359,7 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, calib_args,
         # Get initial guess from valid range
         mus = np.sign(mu_range[0])*np.logspace(np.log10(abs(min(mu_range))),
                                                np.log10(abs(max(mu_range))),
-                                               20)
+                                               15)
         max_lkl, max_x = -np.inf, [np.nan, np.nan]
         for mu in mus:
             if do_calib:
@@ -362,8 +406,8 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, calib_args,
 
     if use_sigma != "Fisher":
         sigma_lo, sigma_hi = get_two_sided_uncertainty_from_loglkl(
-            log_lkl, mu_hat, sigma,
-            do_calib=True, theta_hat=theta_hat, N=1000)
+            log_lkl, mu_hat, sigma, valid_mu_ranges,
+            do_calib=do_calib, theta_hat=theta_hat, N=1000)
 
     if use_sigma == "mean":
         if None in [sigma_lo, sigma_hi]:
@@ -381,6 +425,9 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, calib_args,
 
     elif use_sigma != "Fisher":
         raise ValueError(f"Unknown value for 'use_sigma': '{use_sigma}'...")
+
+    if sigma is None:
+        return np.nan, np.nan
 
     # Careful, we calculate the limit on mu, and convert to Lambda later
     def opt_pval(param, _sigma):
@@ -410,20 +457,21 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, calib_args,
 
 def process_segment(args):
     """Calculate an upper limit - wrapper for multiprocessing."""
-    i, alpha_CL, freq_Hz, do_calib, Y, bkg, model_args, peak_norm, calib_args = args
+    i, alpha_CL, freq_Hz, do_calib, use_sigma, Y, bkg, model_args, peak_norm, calib_args = args
+    kwargs = {"do_calib": do_calib, "use_sigma": use_sigma, "alpha_CL": alpha_CL}
     return i, freq_Hz, get_upper_limits_approx(Y, bkg, peak_norm, model_args,
-                                               calib_args, do_calib=do_calib, alpha_CL=alpha_CL)
+                                               calib_args, **kwargs)
 
 
 def main():
     """Get all necessary data and launch analysis."""
-    # TODO: Add option to disable calibration
     # Analysis variables
     n_frequencies = 2000
     num_processes = 11
     alpha_CL = 0.95
     _MAX_CHI_SQR = 10
-    do_calib = True
+    do_calib = False
+    use_sigma = "lower"
     df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
 
     # TODO: rel. paths
@@ -522,7 +570,7 @@ def main():
 
             if len(Y) == 0:
                 continue
-            yield (count, alpha_CL, freq_Hz, do_calib,
+            yield (count, alpha_CL, freq_Hz, do_calib, use_sigma,
                    *(np.array(x) for x in (Y, bkg, model_args, peak_norm, calib_args)))
             count += 1  # Book-keeping for results merging later
 
@@ -533,6 +581,8 @@ def main():
             for result in pool.imap_unordered(process_segment, args()):
                 results.append(result)
                 pbar.update(1)
+    # for arg in tqdm(args(), total=n_frequencies):
+    #     results.append(process_segment(arg))
 
     # 3. Merge results
     upper_limit_data = np.zeros((4, len(results)))
@@ -567,7 +617,7 @@ def main():
     ax.plot(upper_limit_data[0, :], smooth_lim , label="LIGO",
             color="C1", linewidth=2.)
 
-    np.save("silver_calib.npy", upper_limit_data)
+    np.save("silver_calib_calib.npy", upper_limit_data)
     two = np.load("silver_nocalib.npy")
     _smooth_lim, _ = np.exp(smooth_curve(np.log(two[1, :]), w)), smooth_curve(two[2, :], w)
     ax.plot(two[0, :], _smooth_lim, color="C3", label="nocalib", linewidth=2.)
