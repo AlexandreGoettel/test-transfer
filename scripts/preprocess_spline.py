@@ -1,10 +1,10 @@
 """Pre-process PSDs by (BF-optimized) Fitting splines through segments."""
 import os
 import argparse
+import glob
 from multiprocessing import Pool
 from tqdm import tqdm
 import h5py
-import glob
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
