@@ -24,6 +24,8 @@ warnings.filterwarnings("ignore")
 def parse_inputs():
     """Parse cmdl inputs and return dict."""
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--data-path", type=str, required=True,
+                        help="Path to LPSD output data.")
     parser.add_argument("--json-path", default="data/processing_results.json",
                         help="Path to preprocessing results.")
     parser.add_argument("--max-chi-sqr", type=float, default=10.,
@@ -479,20 +481,21 @@ def process_segment(args):
                                                calib_args, **kwargs)
 
 
-def main(n_frequencies=2000, n_processes=4, alpha_CL=0.95, max_chi_sqr=10, do_calib=False,
-         sigma_method="lower", json_path="data/processing_results.json", smooth_kernel_size=33):
+def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
+         max_chi_sqr=10, do_calib=False, sigma_method="lower",
+         json_path="data/processing_results.json", smooth_kernel_size=33):
     """Get all necessary data and launch analysis."""
     # Analysis constants
     df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
     rho_local = 0.4 / (constants.hbar / constants.e * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
 
-    # Paths # TODO: rel. paths
+    # Paths
+    data_paths = list(glob.glob(os.path.join(data_path, "result*")))
+    if not data_paths:
+        raise ValueError(f"No valid data found in '{data_path}'!")
+    # TODO: rel. paths
     transfer_function_path = "../shared_git_data/Calibration_factor_A_star.txt"
-    calib_dir = "data/calibration"
-
-    # DECIDE WHAT DATA TO USE HERE! # TODO: from config file?
-    data_paths = list(glob.glob("data/result_epsilon10*"))
-    # ############################# #
+    calib_dir = "calibration"
 
     # 0. Get A_star
     tf = np.loadtxt(transfer_function_path, delimiter="\t")
@@ -507,16 +510,16 @@ def main(n_frequencies=2000, n_processes=4, alpha_CL=0.95, max_chi_sqr=10, do_ca
     }
     # 0.2 Open data HDFs
     data_info = []
-    for data_path in tqdm(data_paths, desc="Opening HDFs", leave=False):
+    for _data_path in tqdm(data_paths, desc="Opening HDFs", leave=False):
         _data_info = []
-        _data_info.append(h5py.File(sensutils.get_corrected_path(data_path), "r"))
-        ifo = parse_ifo(data_path)
+        _data_info.append(h5py.File(sensutils.get_corrected_path(_data_path), "r"))
+        ifo = parse_ifo(_data_path)
         _data_info.append(ifo)
-        df_key = "splines_" + sensutils.get_df_key(data_path)
+        df_key = "splines_" + sensutils.get_df_key(_data_path)
         _data_info.append(sensutils.get_results(df_key, json_path))
         assert _data_info[-1] is not None
         # Calibration - Get closest calib GPS time and read out
-        data_gps_time = int(os.path.split(data_path)[-1].split("_")[-3])
+        data_gps_time = int(os.path.split(_data_path)[-1].split("_")[-3])
         nearest_calib_time = calib_gps_times[ifo][np.argmin(np.abs(
             np.array(calib_gps_times[ifo]) - data_gps_time))]
         calib_file = glob.glob(os.path.join(calib_dir, ifo,
@@ -622,6 +625,11 @@ def main(n_frequencies=2000, n_processes=4, alpha_CL=0.95, max_chi_sqr=10, do_ca
                     color="C1", alpha=.33)
     ax.plot(upper_limit_data[0, :], smooth_lim , label="LIGO",
             color="C1", linewidth=2.)
+
+    # np.save("single_epsilon1.npy", upper_limit_data)
+    # two = np.load("single_epsilon10.npy")
+    # _smooth_lim = np.exp(smooth_curve(np.log(two[1, :]), smooth_kernel_size))
+    # ax.plot(two[0, :], _smooth_lim, color="C3", label="epsilon10", linewidth=2.)
 
     # Nice things
     ax.set_yscale("log")

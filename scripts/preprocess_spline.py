@@ -1,5 +1,6 @@
 """Pre-process PSDs by (BF-optimized) Fitting splines through segments."""
 import os
+import argparse
 from multiprocessing import Pool
 from tqdm import tqdm
 import h5py
@@ -19,6 +20,17 @@ from peak_finder import PeakFinder
 import sensutils
 import hist
 import models
+
+
+def parse_inputs():
+    """Parse cmdl inputs and return dict."""
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--data-path", type=str, required=True)
+    parser.add_argument("--data-path-type", default="file", choices=["file", "dir"])
+    parser.add_argument("--output-json-path", type=str, default="data/processing_results.json")
+    parser.add_argument("--verbose", action="store_true")
+
+    return vars(parser.parse_args())
 
 
 def prior_uniform(cube, initial, sigma, epsilon=.05, n_sigma=3):
@@ -193,7 +205,7 @@ def process_iteration(params):
         ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
         ax.plot(x, y)
         ax.plot(x, best_fit)
-        ax.set_title(f"{prefix}, $\chi^2$:{chi_sqr:.1f}")
+        ax.set_title(f"{prefix}, " + r"$\chi^2$:" + f"{chi_sqr:.1f}")
         ax.set_ylabel("log(PSD)")
         axRes.set_xlabel("log(Hz)")
         axRes.grid(linestyle="--", color="grey", alpha=.5)
@@ -363,10 +375,8 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
     sensutils.update_results(df_name, df_peak, json_path)
 
 
-def main(data_path, verbose=False):
+def main(data_path, output_json_path, verbose=False):
     """Organise analysis."""
-    # TODO: rel. paths
-    json_path = "data/processing_results.json"
     kwargs = {"epsilon": 0.01,
               "fmin": 10,
               "fmax": 8192,
@@ -379,16 +389,23 @@ def main(data_path, verbose=False):
     # sensutils.del_df_from_json(df_key, json_path)
 
     # Correct for block structure and find peaks based on that model
-    correct_blocks(data_path, json_path, verbose=verbose, **kwargs)
+    correct_blocks(data_path, output_json_path, verbose=verbose, **kwargs)
 
     # Fit a bayesian regularized spline model using a skew normal likelihood
     # Used on block-corrected noPeak data
-    process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
+    process_hybrid(data_path, output_json_path, ana_fmin=10, ana_fmax=5000,
                    segment_size=10000, k_min=4, k_pruning=2, max_plateau=3,
                    buffer=40, nbins=75, pruning=3,
                    verbose=verbose, n_processes=6)
 
 
 if __name__ == '__main__':
-    for path in glob.glob("data/epsilon1/result*"):
-        main(path, verbose=False)
+    cmdl_kwargs = parse_inputs()
+    path = cmdl_kwargs.pop("data_path")
+    path_type = cmdl_kwargs.pop("data_path_type")
+
+    if path_type == "file":
+        main(path, **cmdl_kwargs)
+    else:
+        for path in glob.glob(os.path.join(path, "result*")):
+            main(path, **cmdl_kwargs)
