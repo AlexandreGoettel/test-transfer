@@ -1,0 +1,6 @@
+.idea/*
+.pylintrc
+.vscode/*
+shared_git_data/*
+test*
+tmp*

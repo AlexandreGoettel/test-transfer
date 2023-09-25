@@ -3,6 +3,7 @@ import os
 from multiprocessing import Pool
 from tqdm import tqdm
 import h5py
+import glob
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
@@ -161,13 +162,14 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
     except RuntimeError:
         return -np.inf, popt.x, [alpha, mu, sigma]
 
-    if verbose:
-        hist.plot_func_hist(fitFunc, _popt, res, bins)
-        plt.show()
-
     # 7. Calculate BIC :-)
     _lkl = skewnorm.pdf(res, _popt[0], loc=_popt[1], scale=_popt[2])
     bic = _lkl.sum() - 0.5 * (2*len(x_knots) + 4) * np.log(len(x))
+
+    if verbose:
+        ax = hist.plot_func_hist(fitFunc, _popt, res, bins)
+        ax.set_title(f"BIC: {bic:.1e}")
+        plt.show()
 
     return bic, popt.x, _popt[:-1]
 
@@ -191,7 +193,7 @@ def process_iteration(params):
         ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
         ax.plot(x, y)
         ax.plot(x, best_fit)
-        ax.set_title(prefix)
+        ax.set_title(f"{prefix}, $\chi^2$:{chi_sqr:.1f}")
         ax.set_ylabel("log(PSD)")
         axRes.set_xlabel("log(Hz)")
         axRes.grid(linestyle="--", color="grey", alpha=.5)
@@ -238,7 +240,7 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
                 continue
             kwargs["disable_tqdm"] = i != len(df) + 1
             x, y = np.log(freq[start:end:pruning]), logPSD[start:end:pruning]
-            yield i, x, y, kwargs, False
+            yield i, x, y, kwargs, verbose
 
     # Parallel calculation
     with Pool(processes=n_processes, maxtasksperchild=10) as pool:
@@ -268,8 +270,10 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
              })])
         sensutils.update_results(df_key, df, json_path, orient="records")
     if verbose:
+        df = sensutils.get_results(df_key, json_path)
         plt.figure()
         plt.plot(df["chi_sqr"])
+        plt.title("chi_sqr/dof")
         plt.show()
 
 
@@ -363,7 +367,7 @@ def main(data_path, verbose=False):
     """Organise analysis."""
     # TODO: rel. paths
     json_path = "data/processing_results.json"
-    kwargs = {"epsilon": 0.1,
+    kwargs = {"epsilon": 0.01,
               "fmin": 10,
               "fmax": 8192,
               "fs": 16384,
@@ -380,12 +384,11 @@ def main(data_path, verbose=False):
     # Fit a bayesian regularized spline model using a skew normal likelihood
     # Used on block-corrected noPeak data
     process_hybrid(data_path, json_path, ana_fmin=10, ana_fmax=5000,
-                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=2,
+                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=3,
                    buffer=40, nbins=75, pruning=3,
-                   verbose=verbose, n_processes=11)
+                   verbose=verbose, n_processes=6)
 
 
 if __name__ == '__main__':
-    for path in ["data/result_epsilon10_1243393026_1243509654_H1.txt",
-                 "data/result_epsilon10_1243393026_1243509654_L1.txt"]:
-        main(path)
+    for path in glob.glob("data/epsilon1/result*"):
+        main(path, verbose=False)

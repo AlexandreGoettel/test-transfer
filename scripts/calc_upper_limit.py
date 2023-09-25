@@ -1,30 +1,47 @@
 """Calculate experimental upper limits based on real data."""
 import os
+import argparse
 from multiprocessing import Pool
-from tqdm import tqdm, trange
 import glob
+from tqdm import tqdm
 import h5py
-from findiff import FinDiff
 import numpy as np
-import pandas as pd
 from matplotlib import pyplot as plt
 from scipy import constants
-from scipy.optimize import minimize, newton, OptimizeResult
-from scipy.stats import norm, skewnorm, chi2
+from scipy.optimize import minimize
+from scipy.stats import norm, chi2
 from scipy.interpolate import interp1d
-from scipy.special import erf
 # Project imports
 import sensutils
 import models
-import hist
+
 
 # tmp
 import warnings
 warnings.filterwarnings("ignore")
 
 
-# Global constant for peak normalisation in likelihood calculation
-rho_local = 0.4 / (constants.hbar / constants.e * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
+def parse_inputs():
+    """Parse cmdl inputs and return dict."""
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--json-path", default="data/processing_results.json",
+                        help="Path to preprocessing results.")
+    parser.add_argument("--max-chi-sqr", type=float, default=10.,
+                        help="Quality cut on preprocessing output.")
+    parser.add_argument("--n-frequencies", type=int, default=2000,
+                        help="Number of frequency bins used in calculation")
+    parser.add_argument("--alpha-CL", type=float, default=0.95,
+                        help="Confidence level for upper limit.")
+    parser.add_argument("--sigma-method", default="lower", choices=["lower", "Fisher", "mean"],
+                        help="How to calculate sigma from the likelihood.")
+    parser.add_argument("--do_calib", action="store_true",
+                        help="Flag to include calibration systematics.")
+    parser.add_argument("--n-processes", type=int, default=4,
+                        help="Number of processes used in calculation.")
+    parser.add_argument("--smooth-kernel-size", type=int, default=33,
+                        help="Kernel size for kde smoothing (only used in plotting).")
+
+    return vars(parser.parse_args())
 
 
 def log_likelihood(params, Y, bkg, peak_norm, model_args,
@@ -92,102 +109,101 @@ def cumf_q_mu(q_mu, mu, mu_prime, sigma):
 
 
 # TODO re-implement with extended (calib) likelihood
-def profile_calc(bkg, peak_norm, model_args, x0, mu_range,
-                 alpha_CL=.95, n_q_mu=47500, tol=1e-5, no_tqdm=False):
-    """Full profile calculation."""
-    def log_lkl(param, data):
-        return log_likelihood(param, data, bkg, peak_norm, model_args)
+# def profile_calc(bkg, peak_norm, model_args, x0, mu_range,
+#                  alpha_CL=.95, n_q_mu=10000, tol=1e-5, no_tqdm=False):
+#     """Full profile calculation."""
+#     def log_lkl(param, data):
+#         return log_likelihood(param, data, bkg, peak_norm, model_args)
 
-    # Generate a bunch of q_mus by fluctuating background
-    def get_q_mu(mu_test, data, mu_hat, max_lkl, zero_lkl, full=True):
-        q_mu = np.zeros_like(mu_hat)
-        if full:
-            mu_hat = np.zeros(data.shape[0])
-            max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
-            for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
-                              total=len(data), disable=no_tqdm):
-                popt = minimize(lambda x: -log_lkl(x, yi),
-                                mu_test/2,
-                                method="Nelder-Mead",
-                                bounds=[(0, mu_range[1])],
-                                tol=tol)
-                if not popt.success:
-                    print(mu_test/2)
-                    print(mu_range)
-                    print(popt)
-                # assert popt.success
-                mu_hat[i], max_lkl[i] = popt.x, -popt.fun
-                zero_lkl[i] = log_lkl(0, yi)
+#     # Generate a bunch of q_mus by fluctuating background
+#     def get_q_mu(mu_test, data, mu_hat, max_lkl, zero_lkl, full=True):
+#         q_mu = np.zeros_like(mu_hat)
+#         if full:
+#             mu_hat = np.zeros(data.shape[0])
+#             max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
+#             for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
+#                               total=len(data), disable=no_tqdm):
+#                 popt = minimize(lambda x: -log_lkl(x, yi),
+#                                 mu_test/2,
+#                                 method="Nelder-Mead",
+#                                 bounds=[(0, mu_range[1])],
+#                                 tol=tol)
+#                 if not popt.success:
+#                     print(mu_test/2)
+#                     print(mu_range)
+#                     print(popt)
+#                 # assert popt.success
+#                 mu_hat[i], max_lkl[i] = popt.x, -popt.fun
+#                 zero_lkl[i] = log_lkl(0, yi)
 
-        mask = mu_hat < mu_test
-        # print(mu_test, mu_hat, data[mask].shape, max_lkl[mask].shape)
-        q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - max_lkl[mask])
-        mask = mu_hat < 0
-        q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - zero_lkl[mask])
-        return q_mu
+#         mask = mu_hat < mu_test
+#         # print(mu_test, mu_hat, data[mask].shape, max_lkl[mask].shape)
+#         q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - max_lkl[mask])
+#         mask = mu_hat < 0
+#         q_mu[mask] = -2 * (log_lkl(mu_test, data[mask]) - zero_lkl[mask])
+#         return q_mu
 
-    # n_q_mu_0, n_q_mu_mu = n_q_mu
-    data_mu_0 = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
-                                   size=(n_q_mu, len(bkg)))
-    full_bkg = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
-                                  size=(n_q_mu, len(bkg)))
+#     data_mu_0 = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
+#                                    size=(n_q_mu, len(bkg)))
+#     full_bkg = bkg + skewnorm.rvs(model_args[:, 0], loc=model_args[:, 1], scale=model_args[:, 2],
+#                                   size=(n_q_mu, len(bkg)))
 
-    # Get mu_hat etc. for data_mu_0 and full_bkg
-    def get_mu_hat_etc(data):
-        mu_hat = np.zeros(data.shape[0])
-        max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
-        for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
-                          total=len(data), disable=no_tqdm):
-            popt = minimize(lambda x: -log_lkl(x, yi),
-                            mu_range[1]/2,
-                            method="Nelder-Mead",
-                            bounds=[(0, mu_range[1])],
-                            tol=tol)
-            assert popt.success
-            mu_hat[i], max_lkl[i] = popt.x, -popt.fun
-            zero_lkl[i] = log_lkl(0, yi)
-        return mu_hat, max_lkl, zero_lkl
+#     # Get mu_hat etc. for data_mu_0 and full_bkg
+#     def get_mu_hat_etc(data):
+#         mu_hat = np.zeros(data.shape[0])
+#         max_lkl, zero_lkl = np.zeros(data.shape[0]), np.zeros(data.shape[0])
+#         for i, yi in tqdm(enumerate(data), desc="q_mu", position=2, leave=False,
+#                           total=len(data), disable=no_tqdm):
+#             popt = minimize(lambda x: -log_lkl(x, yi),
+#                             mu_range[1]/2,
+#                             method="Nelder-Mead",
+#                             bounds=[(0, mu_range[1])],
+#                             tol=tol)
+#             assert popt.success
+#             mu_hat[i], max_lkl[i] = popt.x, -popt.fun
+#             zero_lkl[i] = log_lkl(0, yi)
+#         return mu_hat, max_lkl, zero_lkl
 
-    try:
-        mu_hat_0, max_lkl_0, zero_lkl_0 = get_mu_hat_etc(data_mu_0)
-        mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0 = get_mu_hat_etc(full_bkg)
-    except AssertionError:
-        return np.nan
+#     try:
+#         mu_hat_0, max_lkl_0, zero_lkl_0 = get_mu_hat_etc(data_mu_0)
+#         mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0 = get_mu_hat_etc(full_bkg)
+#     except AssertionError:
+#         return np.nan
 
-    def get_p_val(mu_test, verbose=False):
-        q_mu_0 = get_q_mu(mu_test, data_mu_0, mu_hat_0, max_lkl_0, zero_lkl_0,
-                          full=False)
-        data_mu_mu = np.log(np.exp(full_bkg) + peak_norm*mu_test)
-        q_mu_mu = get_q_mu(mu_test, data_mu_mu, mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0,
-                           full=True)
+#     def get_p_val(mu_test, verbose=False):
+#         q_mu_0 = get_q_mu(mu_test, data_mu_0, mu_hat_0, max_lkl_0, zero_lkl_0,
+#                           full=False)
+#         data_mu_mu = np.log(np.exp(full_bkg) + peak_norm*mu_test)
+#         q_mu_mu = get_q_mu(mu_test, data_mu_mu, mu_hat_mu_0, max_lkl_mu_0, zero_lkl_mu_0,
+#                            full=True)
 
-        # Calculate p-value
-        med_q_mu_0 = np.median(q_mu_0)
-        k = np.sum(np.array(q_mu_mu >= med_q_mu_0, dtype=int))
-        p_val, p_sigma = k / float(n_q_mu), np.sqrt(sensutils.get_eff_var(k, n_q_mu))
-        if type(mu_test) == type(np.array([])) or type(mu_test) == list:
-            mu_test = mu_test[0]
-        if verbose:
-            bins = np.linspace(0, max(q_mu_0), 100)
-            ax = hist.plot_hist(q_mu_0, bins, logy=True, label="f(q_mu|0)", density=True)
-            ax = hist.plot_hist(q_mu_mu, bins, ax=ax, label="f(q_mu|mu)", density=True)
-            ax.axvline(med_q_mu_0, linestyle="--", color="r")
-            ax.set_title(f"{mu_test:.1e}: {p_val:.3f} +- {p_sigma:.4f}")
-            plt.show()
-        return (p_val - (1 - alpha_CL))**2
+#         # Calculate p-value
+#         med_q_mu_0 = np.median(q_mu_0)
+#         k = np.sum(np.array(q_mu_mu >= med_q_mu_0, dtype=int))
+#         p_val, p_sigma = k / float(n_q_mu), np.sqrt(sensutils.get_eff_var(k, n_q_mu))
+#         if type(mu_test) == type(np.array([])) or type(mu_test) == list:
+#             mu_test = mu_test[0]
+#         if verbose:
+#             bins = np.linspace(0, max(q_mu_0), 100)
+#             ax = hist.plot_hist(q_mu_0, bins, logy=True, label="f(q_mu|0)", density=True)
+#             ax = hist.plot_hist(q_mu_mu, bins, ax=ax, label="f(q_mu|mu)", density=True)
+#             ax.axvline(med_q_mu_0, linestyle="--", color="r")
+#             ax.set_title(f"{mu_test:.1e}: {p_val:.3f} +- {p_sigma:.4f}")
+#             plt.show()
+#         return (p_val - (1 - alpha_CL))**2
 
-    # Find good starting value
-    x0 = .5*x0[0]
-    while np.allclose(get_p_val(x0), (1-alpha_CL)**2):
-        tqdm.write(f"Adjusting x0 {x0:.1e}")
-        x0 /= 2
-    # Minimize: get mu for which p-val is correct
-    popt = minimize(get_p_val, x0,
-                    bounds=[mu_range],
-                    method="Nelder-Mead",
-                    tol=1e-5)
-    # get_p_val(popt.x, verbose=True)
-    return popt
+#     # Find good starting value
+#     x0 = .5*x0[0]
+#     while np.allclose(get_p_val(x0), (1-alpha_CL)**2):
+#         tqdm.write(f"Adjusting x0 {x0:.1e}")
+#         x0 /= 2
+#     # Minimize: get mu for which p-val is correct
+#     popt = minimize(get_p_val, x0,
+#                     bounds=[mu_range],
+#                     method="Nelder-Mead",
+#                     tol=1e-5)
+#     # get_p_val(popt.x, verbose=True)
+#     return popt
 
 
 def find_leading_trailing_invalid(arr):
@@ -463,26 +479,20 @@ def process_segment(args):
                                                calib_args, **kwargs)
 
 
-def main():
+def main(n_frequencies=2000, n_processes=4, alpha_CL=0.95, max_chi_sqr=10, do_calib=False,
+         sigma_method="lower", json_path="data/processing_results.json", smooth_kernel_size=33):
     """Get all necessary data and launch analysis."""
-    # Analysis variables
-    n_frequencies = 2000
-    num_processes = 11
-    alpha_CL = 0.95
-    _MAX_CHI_SQR = 10
-    do_calib = False
-    use_sigma = "lower"
+    # Analysis constants
     df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
+    rho_local = 0.4 / (constants.hbar / constants.e * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
 
-    # TODO: rel. paths
-    json_path = "data/processing_results.json"
-    data_paths = []
-    for data_path in glob.glob("data/result_epsilon10*"):
-        data_paths.append(data_path)
-    # data_paths = ["data/result_epsilon10_1239824770_1239926064_L1.lpsd",
-    #               "data/result_epsilon10_1240305825_1240473003_L1.lpsd"]
+    # Paths # TODO: rel. paths
     transfer_function_path = "../shared_git_data/Calibration_factor_A_star.txt"
     calib_dir = "data/calibration"
+
+    # DECIDE WHAT DATA TO USE HERE! # TODO: from config file?
+    data_paths = list(glob.glob("data/result_epsilon10*"))
+    # ############################# #
 
     # 0. Get A_star
     tf = np.loadtxt(transfer_function_path, delimiter="\t")
@@ -514,7 +524,6 @@ def main():
         data = np.loadtxt(calib_file)
         # Assume gaussian error
         freq, mag, mag_1sigma = data[:, 0], data[:, 1], data[:, 5]
-        # print(np.max(mag+mag_1sigma), data[np.argmax(mag+mag_1sigma), 0])
         # assert np.max(mag+mag_1sigma) < 1.33
         f_calib_mag = interp1d(freq, mag, bounds_error=False)
         f_calib_sigma = interp1d(freq, np.abs(mag_1sigma - mag), bounds_error=False)
@@ -538,7 +547,7 @@ def main():
                 x_knots, y_knots, alpha_skew, loc_skew, sigma_skew, chi_sqr\
                     = df[mask][df_columns].iloc[0]
                 # Skip this entry if fit is bad
-                if chi_sqr >= _MAX_CHI_SQR:
+                if chi_sqr >= max_chi_sqr:
                     continue
 
                 # Find closest matching frequency
@@ -570,19 +579,17 @@ def main():
 
             if len(Y) == 0:
                 continue
-            yield (count, alpha_CL, freq_Hz, do_calib, use_sigma,
+            yield (count, alpha_CL, freq_Hz, do_calib, sigma_method,
                    *(np.array(x) for x in (Y, bkg, model_args, peak_norm, calib_args)))
             count += 1  # Book-keeping for results merging later
 
     # 2. Create job Pool
     results = []
-    with Pool(num_processes, maxtasksperchild=10) as pool:
+    with Pool(n_processes, maxtasksperchild=10) as pool:
         with tqdm(total=n_frequencies, position=0, desc="Calc. upper lim") as pbar:
             for result in pool.imap_unordered(process_segment, args()):
                 results.append(result)
                 pbar.update(1)
-    # for arg in tqdm(args(), total=n_frequencies):
-    #     results.append(process_segment(arg))
 
     # 3. Merge results
     upper_limit_data = np.zeros((4, len(results)))
@@ -599,9 +606,8 @@ def main():
     def smooth_curve(y, w):
         return sensutils.kde_smoothing(y, w)
 
-    w = 33
-    smooth_lim = np.exp(smooth_curve(np.log(upper_limit_data[1, :]), w))
-    smooth_sigma = smooth_curve(upper_limit_data[2, :], w)
+    smooth_lim = np.exp(smooth_curve(np.log(upper_limit_data[1, :]), smooth_kernel_size))
+    smooth_sigma = smooth_curve(upper_limit_data[2, :], smooth_kernel_size)
     geo_data = np.loadtxt("geo_limits.csv", delimiter=",")
 
     plt.figure()
@@ -616,11 +622,6 @@ def main():
                     color="C1", alpha=.33)
     ax.plot(upper_limit_data[0, :], smooth_lim , label="LIGO",
             color="C1", linewidth=2.)
-
-    np.save("silver_calib_calib.npy", upper_limit_data)
-    two = np.load("silver_nocalib.npy")
-    _smooth_lim, _ = np.exp(smooth_curve(np.log(two[1, :]), w)), smooth_curve(two[2, :], w)
-    ax.plot(two[0, :], _smooth_lim, color="C3", label="nocalib", linewidth=2.)
 
     # Nice things
     ax.set_yscale("log")
@@ -643,4 +644,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main(**parse_inputs())
