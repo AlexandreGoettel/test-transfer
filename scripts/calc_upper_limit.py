@@ -48,7 +48,7 @@ def parse_inputs():
 
 def log_likelihood(params, Y, bkg, peak_norm, model_args,
                    calib_args=None, doCalib=False):
-    """Likelihood of finding dark matter in the data!"""
+    """Likelihood of finding dark matter in the data."""
     # Actual likelihood calculation
     if doCalib:
         mu_DM, theta = params
@@ -70,26 +70,6 @@ def log_likelihood(params, Y, bkg, peak_norm, model_args,
         return lkl.sum()
     else:
         raise ValueError
-
-
-def parse_ifo(name):
-    """Get ifo from data path."""
-    return name.split(".")[-2].split("/")[-1].split("_")[-1]
-
-
-def binary_search(arr, value):
-    """Perform a binary search to find left-side bounds on value."""
-    lo, hi = 0, len(arr) - 1
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        mid_val = arr[mid]
-        if mid_val < value:
-            lo = mid + 1
-        elif mid_val > value:
-            hi = mid - 1
-        else:
-            return mid
-    return lo
 
 
 def f_q_mu_tilda(q_mu, mu, mu_prime, sigma):
@@ -513,7 +493,7 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
     for _data_path in tqdm(data_paths, desc="Opening HDFs", leave=False):
         _data_info = []
         _data_info.append(h5py.File(sensutils.get_corrected_path(_data_path), "r"))
-        ifo = parse_ifo(_data_path)
+        ifo = sensutils.parse_ifo(_data_path)
         _data_info.append(ifo)
         df_key = "splines_" + sensutils.get_df_key(_data_path)
         _data_info.append(sensutils.get_results(df_key, json_path))
@@ -555,7 +535,7 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
 
                 # Find closest matching frequency
                 frequencies = hdf_path["frequency"]
-                frequency_idx = binary_search(frequencies, test_freq)
+                frequency_idx = sensutils.binary_search(frequencies, test_freq)
                 # Take care of edge cases
                 while frequencies[frequency_idx] < tf[0, 1]:
                     frequency_idx += 1

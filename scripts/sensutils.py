@@ -49,6 +49,26 @@ def sigma_at_point(func, point, initial_dx=1e-5, tolerance=1e-6, max_iterations=
     raise ValueError("Failed to converge to a stable derivative estimate.")
 
 
+def parse_ifo(name):
+    """Get ifo from data path."""
+    return name.split(".")[-2].split("/")[-1].split("_")[-1]
+
+
+def binary_search(arr, value):
+    """Perform a binary search to find left-side bounds on value."""
+    lo, hi = 0, len(arr) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        mid_val = arr[mid]
+        if mid_val < value:
+            lo = mid + 1
+        elif mid_val > value:
+            hi = mid - 1
+        else:
+            return mid
+    return lo
+
+
 def get_corrected_path(data_path):
     """Generate path to store block-corrected results."""
     return os.path.join(
