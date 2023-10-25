@@ -4,6 +4,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import CubicSpline
 import h5py
+# Phil imports
+from falsesignal import FalseSignal
 # Project imports
 import utils
 import fft
@@ -31,8 +33,8 @@ class DataManager:
             print("'injection-type' = None, skipping injections..")
             return
         # Get the injector for the kind of wave to inject
-        if self.kwargs["wavetype"] != "sinelike":
-            raise ValueError("Only sinelike injections implemented.")  # TODO
+        if self.kwargs["wavetype"] == "DMlike":
+            injector = self.signal_generator.inject_DM
         else:
             injector = self.signal_generator.inject_sine
 
@@ -128,7 +130,7 @@ class NoiseGenerator:
     def psd_func(self):
         """
         Define the value of the PSD for any frequency using extrapolation.
-        
+
         Set time, strain, frequencies, ASD
         """
         def extrapolator(X):
@@ -241,7 +243,29 @@ class SignalGenerator:
         self.fs = sampling_frequency
         self.datafile = datafile
 
-    def inject_sine(self, start_idx, end_idx, f, A):
+    def inject_sine(self, start_idx, end_idx, f, A, phase=0):
         """Inject a sine wave of frequency f and amplitude A in a N-length array."""
         t = np.arange(start_idx, end_idx) / self.fs
-        return A * np.sin(2. * np.pi * f * t)
+        return A * np.sin(2. * np.pi * f * t + phase)
+
+    def inject_DM(self, start_idx, end_idx, f, A):
+        """See inject_sine but mimic DM-like signal based on Phil's code."""
+        # The DM signal is the overlap of many sine waves
+        signal = FalseSignal(
+            frequency=f,
+            amplitude=A,
+            phase_seed=np.random.randint(2**31),
+            Nfreqs=500,
+            FWHM=1e-6,
+            day=np.random.randint(365)
+        )
+        output = np.zeros(end_idx - start_idx)
+        for i in range(signal.Nfreqs):
+            output += self.inject_sine(
+                start_idx,
+                end_idx,
+                signal["frequencies"][i],
+                signal["amplitudes"][i],
+                phase=signal["phases"][i]
+            )
+        return output

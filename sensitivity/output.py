@@ -1,5 +1,8 @@
 """Implement classes for input and otuput."""
 import os
+import csv
+import numpy as np
+from tqdm import tqdm
 from string import Template
 import utils
 
@@ -26,7 +29,7 @@ def write_lpsd_sh(output_file=None, length=3600, sampling_frequency=16384,
     # What fmin can we support with data length?
     fmin_from_length = int(1. + utils.get_fmin(length, resolution))
     if fmin_from_length > fmax:
-        raise ValueError("Cannot find valid configuration with this resolution and segment length!")
+        raise ValueError("Cannot find a valid configuration with this resolution and segment length!")
 
     if fmin_from_length > fmin:
         print(f"Warning: using fmin={fmin_from_length}Hz instead of supplied {fmin}Hz" +
@@ -71,3 +74,24 @@ def read_lpsd_sh(filename):
                 data[splits[0]] = float(splits[1])
 
     return data
+
+
+def read(name, dtype=np.float64, n_lines=None,
+         delimiter="\t", raw_freq=True):
+    """
+    Read an output file from LPSD.
+
+    name(str): output file name.
+    return: frequency & PSD arrays.
+    """
+    x, y = [], []
+    with open(name, "r") as _file:
+        data = csv.reader(_file, delimiter=delimiter)
+        for row in tqdm(data, total=n_lines, desc="Reading input PSD.."):
+            try:
+                if raw_freq:
+                    x += [float(row[0])]
+                y += [float(row[1])]
+            except (ValueError, IndexError):
+                continue
+    return np.array(x, dtype=dtype), np.array(y, dtype=dtype)

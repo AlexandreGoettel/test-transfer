@@ -44,3 +44,5 @@ $LPSD_PATH \
         -x 1 \
         -N ${iter} \
         -J ${Nfreqs_full} \
+	-M 30\
+	-E 10
