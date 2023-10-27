@@ -6,6 +6,7 @@ import glob
 from tqdm import tqdm
 import h5py
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from scipy import constants
 from scipy.optimize import minimize
@@ -19,6 +20,7 @@ import models
 # tmp
 import warnings
 warnings.filterwarnings("ignore")
+BASE_PATH = os.path.split(os.path.abspath(__file__))[0]
 
 
 def parse_inputs():
@@ -401,6 +403,8 @@ def get_upper_limits_approx(Y, bkg, peak_norm, model_args, calib_args,
                                          tolerance=1e-4)
     except ValueError:
         return np.nan, np.nan
+    if np.isnan(sigma):
+        return np.nan, np.nan
 
     if use_sigma != "Fisher":
         sigma_lo, sigma_hi = get_two_sided_uncertainty_from_loglkl(
@@ -463,7 +467,8 @@ def process_segment(args):
 
 def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
          max_chi_sqr=10, do_calib=False, sigma_method="lower",
-         json_path="data/processing_results.json", smooth_kernel_size=33):
+         json_path="data/processing_results.json", smooth_kernel_size=33,
+         fmin_ana=10, fmax_ana=5000):
     """Get all necessary data and launch analysis."""
     # Analysis constants
     df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
@@ -473,14 +478,20 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
     data_paths = list(glob.glob(os.path.join(data_path, "result*")))
     if not data_paths:
         raise ValueError(f"No valid data found in '{data_path}'!")
-    # TODO: rel. paths
-    transfer_function_path = "../shared_git_data/Calibration_factor_A_star.txt"
-    calib_dir = "calibration"
+    calib_dir = os.path.join(BASE_PATH, "calibration")
 
     # 0. Get A_star
-    tf = np.loadtxt(transfer_function_path, delimiter="\t")
-    f_A_star = {"H1": interp1d(tf[:, 1], tf[:, 0]),
-                "L1": interp1d(tf[:, 1], tf[:, 0])}  # TODO: other file
+    tf_dir = os.path.join(BASE_PATH, "data", "transfer_functions")
+    transfer_functions = {}
+    transfer_functions["H1"] = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LHO.txt"),
+                                           delimiter="\t")
+    transfer_functions["L1"] = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LLO.txt"),
+                                           delimiter="\t")
+    f_A_star = {"H1": interp1d(transfer_functions["H1"]["Freq_o"],
+                               transfer_functions["H1"]["Amp_Cal_LHO"]),
+                "L1": interp1d(transfer_functions["L1"]["Freq_Cal"],
+                               transfer_functions["L1"]["amp_cal_LLO"])}
+
     # 0.1 Open O3a and O3b calibration envelope files
     calib_gps_times = {
         "H1": [int(f.split("_")[4]) for f in glob.glob(os.path.join(
@@ -515,7 +526,13 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
         data_info.append(_data_info)
 
     # ###### # ###### # ###### #
-    test_frequencies = np.logspace(np.log10(tf[0, 1]), np.log10(tf[-1, 1]), n_frequencies)
+    fmin = max(transfer_functions["H1"]["Freq_o"].iloc[0],
+               transfer_functions["L1"]["Freq_Cal"].iloc[0],
+               fmin_ana)
+    fmax = min(transfer_functions["H1"]["Freq_o"].iloc[-1],
+               transfer_functions["L1"]["Freq_Cal"].iloc[-1],
+               fmax_ana)
+    test_frequencies = np.logspace(np.log10(fmin), np.log10(fmax), n_frequencies)
     def args():
         count = 0
         for test_freq in test_frequencies:
@@ -537,9 +554,11 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
                 frequencies = hdf_path["frequency"]
                 frequency_idx = sensutils.binary_search(frequencies, test_freq)
                 # Take care of edge cases
-                while frequencies[frequency_idx] < tf[0, 1]:
+                tf_freqs = transfer_functions["H1"]["Freq_o"] if ifo == "H1"\
+                    else transfer_functions["L1"]["Freq_Cal"]
+                while frequencies[frequency_idx] < tf_freqs.iloc[0]:
                     frequency_idx += 1
-                while frequencies[frequency_idx] > tf[-1, 1]:
+                while frequencies[frequency_idx] > tf_freqs.iloc[-1]:
                     frequency_idx -= 1
                 # frequency_idx = np.argmin(np.abs(frequencies - test_freq))
                 freq_Hz = frequencies[frequency_idx]
@@ -568,7 +587,7 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
 
     # 2. Create job Pool
     results = []
-    with Pool(n_processes, maxtasksperchild=10) as pool:
+    with Pool(n_processes, maxtasksperchild=100) as pool:
         with tqdm(total=n_frequencies, position=0, desc="Calc. upper lim") as pbar:
             for result in pool.imap_unordered(process_segment, args()):
                 results.append(result)
@@ -606,7 +625,7 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
     ax.plot(upper_limit_data[0, :], smooth_lim , label="LIGO",
             color="C1", linewidth=2.)
 
-    # np.save("single_epsilon1.npy", upper_limit_data)
+    # np.savez("lower_full_epsilon10.npz", freq=upper_limit_data[0, :], y=smooth_lim)
     # two = np.load("single_epsilon10.npy")
     # _smooth_lim = np.exp(smooth_curve(np.log(two[1, :]), smooth_kernel_size))
     # ax.plot(two[0, :], _smooth_lim, color="C3", label="epsilon10", linewidth=2.)
@@ -614,20 +633,21 @@ def main(data_path, n_frequencies=2000, n_processes=4, alpha_CL=0.95,
     # Nice things
     ax.set_yscale("log")
     ax.set_xscale("log")
-    axTop = ax.twiny()
-    axTop.set_xscale("log")
-    ax.set_xlim(10, 5000)
-    axTop.set_xlim(ax.get_xlim())
-    ticks = np.array([1e-13, 1e-12, 1e-11])
-    axTop.set_xticks(ticks * constants.e / constants.h)
-    axTop.set_xticklabels(ticks)
+    ax.set_xlim(9, 5000)
     ax.set_xlabel("Frequency (Hz)")
-    axTop.set_xlabel("DM mass (eV)")
     ax.set_ylabel(r"$1/\Lambda_i$ (GeV)")
     ax.set_title("PRELIMINARY 95% UPPER LIMITS")
     ax.legend(loc="best")
     ax.grid(color="grey", alpha=.33, linestyle="--", linewidth=1.5, which="both")
     ax.minorticks_on()
+
+    ticks = np.array([1e-13, 1e-12, 1e-11])
+    axTop = ax.twiny()
+    axTop.set_xticks(ticks * constants.e / constants.h)
+    axTop.set_xticklabels(ticks)
+    axTop.set_xlim([_lim/constants.e * constants.h for _lim in ax.get_xlim()])
+    axTop.set_xscale("log")
+    axTop.set_xlabel("DM mass (eV)")
     plt.show()
 
 
