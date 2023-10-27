@@ -7,17 +7,15 @@ Idea here: Use f(q0|0) and q0 from data and that's it ^_^
 Have to compare f(q0|0) between MC and theory (sigma-independent!)
 """
 import os
-import argparse
 from multiprocessing import Pool
 import glob
 from tqdm import tqdm
 import h5py
+import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib.gridspec import GridSpec
 from scipy import constants
 from scipy.optimize import minimize
-from scipy.stats import norm, chi2
 from scipy.interpolate import interp1d
 # Project imports
 import sensutils
@@ -27,6 +25,7 @@ import models
 # tmp
 import warnings
 warnings.filterwarnings("ignore")
+BASE_PATH = os.path.split(os.path.abspath(__file__))[0]
 
 
 def log_likelihood(params, Y, bkg, peak_norm, model_args,
@@ -88,7 +87,7 @@ def process_segment(args):
                                                   calib_args, **kwargs)
 
 
-def main(data_path, n_frequencies=2000, n_processes=4,
+def main(data_path, n_frequencies=2000, n_processes=4, fmin_ana=10, fmax_ana=5000,
          max_chi_sqr=10, do_calib=False, json_path="data/processing_results.json"):
     """Get all necessary data and launch analysis."""
     # Analysis constants
@@ -99,14 +98,20 @@ def main(data_path, n_frequencies=2000, n_processes=4,
     data_paths = list(glob.glob(os.path.join(data_path, "result*")))
     if not data_paths:
         raise ValueError(f"No valid data found in '{data_path}'!")
-    # TODO: rel. paths
-    transfer_function_path = "../shared_git_data/Calibration_factor_A_star.txt"
-    calib_dir = "calibration"
+    calib_dir = os.path.join(BASE_PATH, "calibration")
 
     # 0. Get A_star
-    tf = np.loadtxt(transfer_function_path, delimiter="\t")
-    f_A_star = {"H1": interp1d(tf[:, 1], tf[:, 0]),
-                "L1": interp1d(tf[:, 1], tf[:, 0])}  # TODO: other file
+    tf_dir = os.path.join(BASE_PATH, "data", "transfer_functions")
+    transfer_functions = {}
+    transfer_functions["H1"] = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LHO.txt"),
+                                           delimiter="\t")
+    transfer_functions["L1"] = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LLO.txt"),
+                                           delimiter="\t")
+    f_A_star = {"H1": interp1d(transfer_functions["H1"]["Freq_o"],
+                               transfer_functions["H1"]["Amp_Cal_LHO"]),
+                "L1": interp1d(transfer_functions["L1"]["Freq_Cal"],
+                               transfer_functions["L1"]["amp_cal_LLO"])}
+
     # 0.1 Open O3a and O3b calibration envelope files
     calib_gps_times = {
         "H1": [int(f.split("_")[4]) for f in glob.glob(os.path.join(
@@ -141,7 +146,13 @@ def main(data_path, n_frequencies=2000, n_processes=4,
         data_info.append(_data_info)
 
     # ###### # ###### # ###### #
-    test_frequencies = np.logspace(np.log10(tf[0, 1]), np.log10(tf[-1, 1]), n_frequencies)
+    fmin = max(transfer_functions["H1"]["Freq_o"].iloc[0],
+               transfer_functions["L1"]["Freq_Cal"].iloc[0],
+               fmin_ana)
+    fmax = min(transfer_functions["H1"]["Freq_o"].iloc[-1],
+               transfer_functions["L1"]["Freq_Cal"].iloc[-1],
+               fmax_ana)
+    test_frequencies = np.logspace(np.log10(fmin), np.log10(fmax), n_frequencies)
     def args():
         count = 0
         for test_freq in test_frequencies:
@@ -163,9 +174,11 @@ def main(data_path, n_frequencies=2000, n_processes=4,
                 frequencies = hdf_path["frequency"]
                 frequency_idx = sensutils.binary_search(frequencies, test_freq)
                 # Take care of edge cases
-                while frequencies[frequency_idx] < tf[0, 1]:
+                tf_freqs = transfer_functions["H1"]["Freq_o"] if ifo == "H1"\
+                    else transfer_functions["L1"]["Freq_Cal"]
+                while frequencies[frequency_idx] < tf_freqs.iloc[0]:
                     frequency_idx += 1
-                while frequencies[frequency_idx] > tf[-1, 1]:
+                while frequencies[frequency_idx] > tf_freqs.iloc[-1]:
                     frequency_idx -= 1
                 # frequency_idx = np.argmin(np.abs(frequencies - test_freq))
                 freq_Hz = frequencies[frequency_idx]
@@ -194,22 +207,22 @@ def main(data_path, n_frequencies=2000, n_processes=4,
             count += 1  # Book-keeping for results merging later
 
     # 2. Create job Pool
-    # results = []
-    # with Pool(n_processes, maxtasksperchild=10) as pool:
-    #     with tqdm(total=n_frequencies, position=0, desc="Looking for DM") as pbar:
-    #         for result in pool.imap_unordered(process_segment, args()):
-    #             results.append(result)
-    #             pbar.update(1)
+    results = []
+    with Pool(n_processes, maxtasksperchild=100) as pool:
+        with tqdm(total=n_frequencies, position=0, desc="Looking for DM") as pbar:
+            for result in pool.imap_unordered(process_segment, args()):
+                results.append(result)
+                pbar.update(1)
 
-    # # 3. Merge results
-    # discovery_data = np.zeros((2, len(results)))
-    # for i, freq_Hz, significance in results:
-    #     discovery_data[0, i] = freq_Hz
-    #     discovery_data[1, i] = significance
+    # 3. Merge results
+    discovery_data = np.zeros((2, len(results)))
+    for i, freq_Hz, significance in results:
+        discovery_data[0, i] = freq_Hz
+        discovery_data[1, i] = significance
 
     # tmp
-    discovery_data = np.load("discovery.npy")
-    # np.save("discovery.npy", discovery_data)
+    # discovery_data = np.load("discovery.npy")
+    np.save("discovery.npy", discovery_data)
 
     # 4. Plots & stuff
     ax = plt.subplot(111)
@@ -247,7 +260,7 @@ def main(data_path, n_frequencies=2000, n_processes=4,
             fmax_idx = sensutils.binary_search(frequencies, fmax)
 
             ax.plot(hdf_path["frequency"][fmin_idx:fmax_idx],
-                    hdf_path["logPSD"][fmin_idx:fmax_idx])
+                    hdf_path["logPSD"][fmin_idx:fmax_idx], alpha=.1)
 
         # Nice things
         ax.axvline(discovery_data[0, i], color="r", linestyle="--", linewidth=.5)
@@ -256,4 +269,4 @@ def main(data_path, n_frequencies=2000, n_processes=4,
 
 
 if __name__ == '__main__':
-    main("data", n_processes=9)
+    main("data", n_frequencies=10000, n_processes=10)
