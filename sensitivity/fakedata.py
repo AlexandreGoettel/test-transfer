@@ -260,12 +260,9 @@ class SignalGenerator:
             day=np.random.randint(365)
         )
         output = np.zeros(end_idx - start_idx)
-        for i in range(signal.Nfreqs):
-            output += self.inject_sine(
-                start_idx,
-                end_idx,
-                signal["frequencies"][i],
-                signal["amplitudes"][i],
-                phase=signal["phases"][i]
-            )
+        t = np.arange(start_idx, end_idx) / self.fs
+        for A, f, phase in tqdm(zip(signal["amplitudes"], signal["frequencies"], signal["phases"]),
+                                desc="DM freqs", total=500):
+            output += A * np.sin(2.*np.pi * f * t + phase)
+
         return output
