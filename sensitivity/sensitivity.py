@@ -13,6 +13,7 @@ def main(**kwargs):
         manager = DataManager(**kwargs)
         manager.generate_noise()
         manager.add_injections()
+        manager.strain_from_PSD()
         manager.plot_data()
         if kwargs["gen_lpsd_sh"]:
             write_lpsd_sh(**kwargs)

@@ -22,11 +22,15 @@ class DataManager:
         self.noise_generator = NoiseGenerator(self.datafile, **kwargs)
         self.signal_generator = SignalGenerator(self.datafile, **kwargs)
 
+        # Initialise entropy
+        np.random.seed()
+        self.starting_seed = np.random.randint(int(2**31))
+
     def __del__(self):
         self.datafile.close()
 
-    def add_injections(self, dset="strain"):
-        """Inject signals into the time series in self.datafile[dset]."""
+    def add_injections(self, dset="PSD"):
+        """Inject signals into the PSD in self.datafile[dset]."""
         # Use "injection_type", "injection_file", "injection_frequencies"
         injection_type = self.kwargs["injection_type"]
         if injection_type == "None":
@@ -51,21 +55,95 @@ class DataManager:
             N_gen = injData.shape[0]
 
         # Perform injection(s)
-        N = len(self.datafile[dset])
         print("Injecting signals..")
-        for start_index in trange(0, N, self.nmax,
-                                  desc="Memory unit", position=0):
-            end_index = min(start_index + self.nmax, N)
-            signal = np.zeros(end_index - start_index)
-            for freq, amp in tqdm(freq_amp_gen, total=N_gen,
-                                  desc="Injection frequency", position=1, leave=False):
-                signal += injector(start_index, end_index, freq, amp)
-            # Write to file
-            self.datafile[dset][start_index:end_index] += signal
+        for freq, amp in tqdm(freq_amp_gen, total=N_gen,
+                                desc="Injection frequency", position=1, leave=False):
+            start_idx, end_idx, signal = injector(freq, amp)
+            # Write to disk
+            self.datafile[dset][start_idx:end_idx] += signal
 
     def generate_noise(self):
         """Generate data using the NoiseGenerator class."""
-        self.noise_generator.freq_to_time()
+        self.noise_generator.generate_psd()
+
+    def process_chunk(self, start, end, delta_f, dset, dset_index, seed=42):
+        """Simulate complex-valued fft output noise in frequency domain."""
+        M = int((end - start) / delta_f)
+        freq_data = np.sqrt(2. * dset[dset_index:dset_index+M])  # PSD->ASD
+        # Give each freq. a random phase and use it to generate a complex signal
+        np.random.seed(self.starting_seed + seed)
+        phase_data = np.random.random(size=len(freq_data)) * 2. * np.pi
+        return freq_data * np.exp(1j * phase_data)
+
+    def strain_from_PSD(self, dname="PSD"):
+        """Generate strain data from PSD."""
+        dset_PSD = self.datafile[dname]
+        N = len(dset_PSD)
+        delta_f, fs = dset_PSD.attrs["delta_f"], dset_PSD.attrs["sampling_frequency"]
+        n_time = 2*N + 1
+        max_f = fs / 2.
+
+        # Generate a temporary dataset to store phase
+        dname_ASD = "ASD_complex"
+        self.datafile.create_dataset(dname_ASD, (n_time,), dtype=np.complex128)
+        dset = self.datafile[dname_ASD]
+
+        # Loop over memory units to write quasi-symmetric f-array
+        start, dset_index = delta_f, 0  # start in f-space, not index
+        for start in tqdm(np.arange(delta_f, max_f + delta_f, self.nmax * delta_f),
+                          desc="Create complex ASD"):
+            # Loop condition
+            end = min(max_f + delta_f, start + self.nmax * delta_f)
+
+            # Create complex ASD data
+            _seed = int((start - delta_f) / (self.nmax * delta_f)) + 1
+            data = self.process_chunk(start, end, delta_f, dset, dset_index, _seed)
+
+            # Write in fft-output format to prepare for iFFT
+            M = len(data)
+            dset[1+dset_index:1+dset_index + M] = data
+
+            last_iteration = start + self.nmax * delta_f >= max_f + delta_f
+            if dset_index:
+                dset[-(dset_index+M)+int(last_iteration):-dset_index] = np.conjugate(data[-2::-1])\
+                    if last_iteration else np.conjugate(data[::-1])
+            else:
+                dset[-(dset_index+M)+int(last_iteration):] = np.conjugate(data[-2::-1])\
+                    if last_iteration else np.conjugate(data[::-1])
+            dset_index += M
+        dset[0] = 0  # DC-component
+
+        # Aply iFFT and store "complex_strain" dataset
+        self.datafile.create_dataset("complex_strain", (n_time,), dtype=np.complex128)
+        if n_time <= self.nmax:
+            print("Performing NORMAL iFFT..")
+            self.datafile["complex_strain"][:] = fft.FFT(dset, reverse=True, is_top_level=True)
+        else:
+            print("Performing MEMORY iFFT..")
+            fft.memory_FFT(n_time, n_time, self.nmax, self.datafile, self.datafile,
+                           dname, "complex_strain", reverse=True)
+            del self.datafile[dname]
+
+        # Save only real part
+        # Imaginary parts should be negligible anyway
+        dset_strain = self.datafile["complex_strain"]
+        if self.nmax <= n_time:
+            dset_real = self.datafile.create_dataset("strain", (n_time,), dtype=np.float64)
+            for start in trange(0, n_time, self.nmax,
+                                desc="Write real strain", position=2, leave=False):
+                end = min(start + self.nmax, n_time)
+                dset_real[start:end] = dset_strain[start:end].real
+        else:
+            # If n_time is not greater than nmax, just replace it in one go
+            dset_new = dset_strain[:n_time].real
+            del self.datafile["complex_strain"]
+            self.datafile.create_dataset("strain", data=dset_new, dtype=np.float64)
+
+        # Set attributes for readability
+        dset.attrs["sampling_frequency"] = self.kwargs["sampling_frequency"]
+        dset.attrs["f0"] = delta_f
+        dset.attrs["delta_f"] = delta_f
+        self.datafile["strain"].attrs["delta_t"] = 1. / self.kwargs["sampling_frequency"]
 
     def plot_data(self):
         """Plot the strain and ASD data if it exists."""
@@ -110,9 +188,6 @@ class NoiseGenerator:
         self.kwargs = kwargs
         self.nmax = kwargs["nmax"]  # How much to put in memory at one time
         self.datafile = datafile
-        # Initialise entropy
-        np.random.seed()
-        self.starting_seed = np.random.randint(int(2**31))
 
     def psd_from_spline(self):
         """Generate a function from pre-fitted spline data."""
@@ -152,17 +227,8 @@ class NoiseGenerator:
             return x*(N)**2 / 16
         return extrapolator
 
-    def process_chunk(self, start, end, delta_f, psd_func, seed=42):
-        """Simulate complex-valued fft output noise in frequency domain."""
-        positive_freqs = np.arange(start, end, delta_f)
-        freq_data = np.sqrt(2. * psd_func(positive_freqs))  # PSD->ASD
-        # Give each freq. a random phase and use it to generate a complex signal
-        np.random.seed(self.starting_seed + seed)
-        phase_data = np.random.random(size=len(freq_data)) * 2. * np.pi
-        return freq_data * np.exp(1j * phase_data)
-
-    def freq_to_time(self):
-        """Generate a random time series from the PSD."""
+    def generate_psd(self, dname="PSD"):
+        """Generate the PSD and write it to disk."""
         # Define variables
         fs, T = self.kwargs["sampling_frequency"], self.kwargs["length"]
         # Adjust T so that n_time is a power of two
@@ -170,72 +236,32 @@ class NoiseGenerator:
         if n_time > 2*int(T*fs / 2.):
             print(f"Warning: writing t={n_time/fs:.1f}s instead of t={T}s"+
                   " of strain to satisfy Nfft condition.")
-        T = n_time / fs
         delta_f = fs / n_time
         max_f = fs / 2.  # Hz
 
         # Create h5 file to store complex data out of memory
-        dname = "ASD_complex"
-        self.datafile.create_dataset(dname, (n_time,), dtype=np.complex128)
+        self.datafile.create_dataset(dname, (n_time//2,), dtype=np.float64)
         dset = self.datafile[dname]
 
         # Loop over memory units to write quasi-symmetric f-array
-        start, dset_index = delta_f, 0  # start in f-space, not index
         psd_func = self.psd_func(n_time)
-        print("Generating noise..")
-        for start in tqdm(np.arange(delta_f, max_f + delta_f, self.nmax * delta_f)):
+        dset_index = 0
+        for start in tqdm(np.arange(delta_f, max_f + delta_f, self.nmax * delta_f),
+                          desc="Generate noise"):
             # Loop condition
             end = min(max_f + delta_f, start + self.nmax * delta_f)
 
             # Create complex ASD data
-            _seed = int((start - delta_f) / (self.nmax * delta_f)) + 1
-            data = self.process_chunk(start, end, delta_f, psd_func, _seed)
+            positive_freqs = np.arange(start, end, delta_f)
+            M = len(positive_freqs)
+            dset[dset_index:dset_index + M] = psd_func(positive_freqs)
 
-            # Write in fft-output format to prepare for iFFT
-            M = len(data)
-            dset[1+dset_index:1+dset_index + M] = data
-
-            last_iteration = start + self.nmax * delta_f >= max_f + delta_f
-            if dset_index:
-                dset[-(dset_index+M)+int(last_iteration):-dset_index] = np.conjugate(data[-2::-1])\
-                    if last_iteration else np.conjugate(data[::-1])
-            else:
-                dset[-(dset_index+M)+int(last_iteration):] = np.conjugate(data[-2::-1])\
-                    if last_iteration else np.conjugate(data[::-1])
             dset_index += M
-        dset[0] = 0  # DC-component
-
-        # Aply iFFT and store "complex_strain" dataset
-        self.datafile.create_dataset("complex_strain", (n_time,), dtype=np.complex128)
-        if n_time <= self.nmax:
-            print("Performing NORMAL iFFT..")
-            self.datafile["complex_strain"][:] = fft.FFT(dset, reverse=True, is_top_level=True)
-        else:
-            print("Performing MEMORY iFFT..")
-            fft.memory_FFT(n_time, n_time, self.nmax, self.datafile, self.datafile,
-                           dname, "complex_strain", reverse=True)
-            del self.datafile[dname]
-
-        # Save only real part
-        # Imaginary parts should be negligible anyway
-        dset_strain = self.datafile["complex_strain"]
-        print("Project complex to real..")
-        if self.nmax <= n_time:
-            dset_real = self.datafile.create_dataset("strain", (n_time,), dtype=np.float64)
-            for start in trange(0, n_time, self.nmax):
-                end = min(start + self.nmax, n_time)
-                dset_real[start:end] = dset_strain[start:end].real
-        else:
-            # If n_time is not greater than nmax, just replace it in one go
-            dset_new = dset_strain[:n_time].real
-            del self.datafile["complex_strain"]
-            self.datafile.create_dataset("strain", data=dset_new, dtype=np.float64)
 
         # Set attributes for readability
         dset.attrs["sampling_frequency"] = self.kwargs["sampling_frequency"]
         dset.attrs["f0"] = delta_f
         dset.attrs["delta_f"] = delta_f
-        self.datafile["strain"].attrs["delta_t"] = 1. / self.kwargs["sampling_frequency"]
 
 
 class SignalGenerator:
@@ -244,27 +270,40 @@ class SignalGenerator:
         self.fs = sampling_frequency
         self.datafile = datafile
 
-    def inject_sine(self, start_idx, end_idx, f, A, phase=0):
-        """Inject a sine wave of frequency f and amplitude A in a N-length array."""
-        t = np.arange(start_idx, end_idx) / self.fs
-        return A * np.sin(2. * np.pi * f * t + phase)
+    # def inject_sine(self, start_idx, end_idx, f, A, phase=0):
+    #     """Inject a sine wave of frequency f and amplitude A in a N-length array."""
+    #     t = np.arange(start_idx, end_idx) / self.fs
+    #     return A * np.sin(2. * np.pi * f * t + phase)
 
-    def inject_DM(self, start_idx, end_idx, f, A):
-        """See inject_sine but mimic DM-like signal based on Phil's code."""
-        # The DM signal is the overlap of many sine waves
-        signal = FalseSignal(
-            frequency=f,
-            amplitude=A,
-            phase_seed=np.random.randint(2**31),
-            Nfreqs=500,
-            FWHM=1e-6,
-            day=np.random.randint(365)
-        )
-        output = np.zeros(end_idx - start_idx)
-        t = np.arange(start_idx, end_idx) / self.fs
-        for A, f, phase in tqdm(zip(signal["amplitudes"], signal["frequencies"], signal["phases"]),
-                                desc="DM freqs", total=500):
-            output += A * np.sin(2.*np.pi * f * t + phase)
+    def inject_sine(self, f, A, dname="PSD"):
+        """Inject a sine wave into the data."""
+        # Find correct frequency bin
+        dset = self.datafile[dname]
+        N, f0, delta_f = len(dset), dset.attrs["f0"], dset.attrs["delta_f"]
 
-        return output
+        idx = int(np.ceil((f - f0) / delta_f))
+        amplitude = (A * N)**2 / 8
+        return idx, idx+1, np.ones(1) * amplitude
+
+    # def inject_DM(self, start_idx, end_idx, f, A):
+    #     """See inject_sine but mimic DM-like signal based on Phil's code."""
+    #     # The DM signal is the overlap of many sine waves
+    #     signal = FalseSignal(
+    #         frequency=f,
+    #         amplitude=A,
+    #         phase_seed=np.random.randint(2**31),
+    #         Nfreqs=500,
+    #         FWHM=1e-6,
+    #         day=np.random.randint(365)
+    #     )
+    #     output = np.zeros(end_idx - start_idx)
+    #     t = np.arange(start_idx, end_idx) / self.fs
+    #     for A, f, phase in tqdm(zip(signal["amplitudes"], signal["frequencies"], signal["phases"]),
+    #                             desc="DM freqs", total=500):
+    #         output += A * np.sin(2.*np.pi * f * t + phase)
+
+    #     return output
     # TODO INJECT_DM_FROM_FREQ!
+    def inject_DM(self, f, A):
+        """Inject a DM-like signal in frequency space."""
+        return None, None, None
