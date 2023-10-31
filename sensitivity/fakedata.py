@@ -127,7 +127,7 @@ class NoiseGenerator:
             return np.exp(CubicSpline(xKnots, yKnots, extrapolate=False)(np.log(x)))
         return linspace_spline
 
-    def psd_func(self):
+    def psd_func(self, N):
         """
         Define the value of the PSD for any frequency using extrapolation.
 
@@ -148,7 +148,8 @@ class NoiseGenerator:
             if last_non_nan - len(x):
                 x[last_non_nan+1:] = x[last_non_nan]
 
-            return x
+            # Normalise
+            return x*(N)**2 / 16
         return extrapolator
 
     def process_chunk(self, start, end, delta_f, psd_func, seed=42):
@@ -171,7 +172,7 @@ class NoiseGenerator:
                   " of strain to satisfy Nfft condition.")
         T = n_time / fs
         delta_f = fs / n_time
-        max_f = self.kwargs["sampling_frequency"] / 2.  # Hz
+        max_f = fs / 2.  # Hz
 
         # Create h5 file to store complex data out of memory
         dname = "ASD_complex"
@@ -180,7 +181,7 @@ class NoiseGenerator:
 
         # Loop over memory units to write quasi-symmetric f-array
         start, dset_index = delta_f, 0  # start in f-space, not index
-        psd_func = self.psd_func()
+        psd_func = self.psd_func(n_time)
         print("Generating noise..")
         for start in tqdm(np.arange(delta_f, max_f + delta_f, self.nmax * delta_f)):
             # Loop condition
@@ -266,3 +267,4 @@ class SignalGenerator:
             output += A * np.sin(2.*np.pi * f * t + phase)
 
         return output
+    # TODO INJECT_DM_FROM_FREQ!
