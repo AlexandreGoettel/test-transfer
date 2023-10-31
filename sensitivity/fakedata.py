@@ -29,8 +29,8 @@ class DataManager:
     def __del__(self):
         self.datafile.close()
 
-    def add_injections(self, dset="PSD"):
-        """Inject signals into the PSD in self.datafile[dset]."""
+    def add_injections(self, dname="PSD"):
+        """Inject signals into the PSD in self.datafile[dname]."""
         # Use "injection_type", "injection_file", "injection_frequencies"
         injection_type = self.kwargs["injection_type"]
         if injection_type == "None":
@@ -58,9 +58,10 @@ class DataManager:
         print("Injecting signals..")
         for freq, amp in tqdm(freq_amp_gen, total=N_gen,
                                 desc="Injection frequency", position=1, leave=False):
+            tqdm.write(f"AMP: {amp}")
             start_idx, end_idx, signal = injector(freq, amp)
             # Write to disk
-            self.datafile[dset][start_idx:end_idx] += signal
+            self.datafile[dname][start_idx:end_idx] += signal
 
     def generate_noise(self):
         """Generate data using the NoiseGenerator class."""
@@ -80,7 +81,7 @@ class DataManager:
         dset_PSD = self.datafile[dname]
         N = len(dset_PSD)
         delta_f, fs = dset_PSD.attrs["delta_f"], dset_PSD.attrs["sampling_frequency"]
-        n_time = 2*N + 1
+        n_time = 2*N
         max_f = fs / 2.
 
         # Generate a temporary dataset to store phase
@@ -97,7 +98,7 @@ class DataManager:
 
             # Create complex ASD data
             _seed = int((start - delta_f) / (self.nmax * delta_f)) + 1
-            data = self.process_chunk(start, end, delta_f, dset, dset_index, _seed)
+            data = self.process_chunk(start, end, delta_f, dset_PSD, dset_index, _seed)
 
             # Write in fft-output format to prepare for iFFT
             M = len(data)
