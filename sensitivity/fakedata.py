@@ -1,14 +1,22 @@
 """Define classes to manage noise and signal data for injections."""
+import os
 from tqdm import tqdm, trange
+import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import interp1d, CubicSpline
+from scipy.integrate import quad
+from scipy.optimize import fsolve
+from scipy import constants
 import h5py
 # Phil imports
 from falsesignal import FalseSignal
 # Project imports
 import utils
 import fft
+
+
+BASE_PATH = os.path.split(os.path.split(os.path.abspath(__file__))[0])[0]
 
 
 class DataManager:
@@ -59,7 +67,7 @@ class DataManager:
         for freq, amp in tqdm(freq_amp_gen, total=N_gen,
                                 desc="Injection frequency", position=1, leave=False):
             tqdm.write(f"AMP: {amp}")
-            start_idx, end_idx, signal = injector(freq, amp)
+            start_idx, end_idx, signal = injector(freq, amp, dname=dname)
             # Write to disk
             self.datafile[dname][start_idx:end_idx] += signal
 
@@ -267,14 +275,20 @@ class NoiseGenerator:
 
 class SignalGenerator:
     """Create time domain injections for sine-like and DM-like signals."""
-    def __init__(self, datafile, sampling_frequency=16384., **_):
+    def __init__(self, datafile, sampling_frequency=16384., **kwargs):
+        """Init fs/datafile and prep. DM conversion assuming H1."""
+        self.resolution = kwargs["resolution"]
         self.fs = sampling_frequency
         self.datafile = datafile
+        # Open transfer function file for DM-amp conversion
+        tf_dir = os.path.join(BASE_PATH, "scripts", "data", "transfer_functions")
+        tf_data = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LHO.txt"), delimiter="\t")
+        f_A_star = interp1d(tf_data["Freq_o"], tf_data["Amp_Cal_LHO"])
 
-    # def inject_sine(self, start_idx, end_idx, f, A, phase=0):
-    #     """Inject a sine wave of frequency f and amplitude A in a N-length array."""
-    #     t = np.arange(start_idx, end_idx) / self.fs
-    #     return A * np.sin(2. * np.pi * f * t + phase)
+        # Calculate beta
+        rho_local = 0.4 / (constants.hbar / constants.e * 1e-7 * constants.c)**3  # to GeV^4
+        self.beta = lambda f_Hz: rho_local / (np.pi*f_Hz**3 * f_A_star(f_Hz)**2
+                                              * (constants.e / constants.h)**2)
 
     def inject_sine(self, f, A, dname="PSD"):
         """Inject a sine wave into the data."""
@@ -305,6 +319,46 @@ class SignalGenerator:
 
     #     return output
     # TODO INJECT_DM_FROM_FREQ!
-    def inject_DM(self, f, A):
+    def DM_line_shape(self, freq, remainder=1e-3):
+        """
+        Return interpolant to DM line shape, and bounds.
+
+        Determine bounds by numerically integrating up to remainder.
+        """
+        tau = 1. / (freq * self.resolution)
+        xmin = freq - 1. / (2*tau)
+        xmax = freq + 10. / tau
+        def analytical_line_shape(x, tau, x0):
+            return tau/np.sqrt(2*np.pi)*np.exp(-tau*(x-x0)-1) * np.sinh(np.sqrt(1 + 2*tau*(x-x0)))
+
+        def to_solve(x, xmin, tau, freq, alpha):
+            if x < xmin:
+                return 100
+            val = quad(analytical_line_shape, xmin, x, args=(tau, freq))[0]
+            return (val - 0.5*(1-alpha))**2
+
+        upper_bound_solved = fsolve(to_solve, xmax, args=(xmin, tau, freq, remainder))
+
+        N = 1000
+        x = np.linspace(xmin, upper_bound_solved, 1000).reshape((N,))
+        y = analytical_line_shape(x, tau, freq).reshape((N,))
+        return xmin, upper_bound_solved, interp1d(x, y)
+
+    def inject_DM(self, f, A, dname="PSD"):
         """Inject a DM-like signal in frequency space."""
-        return None, None, None
+        # Get frequency axis info
+        dset = self.datafile[dname]
+        N, f0, delta_f = len(dset), dset.attrs["f0"], dset.attrs["delta_f"]
+
+        # Get DM line shape and convert for practical use
+        fmin, fmax, f_line_shape = self.DM_line_shape(f)
+        # idx = int(np.ceil((f - f0) / delta_f))
+        idx_xmin = int(np.ceil((fmin - f0) / delta_f))
+        idx_xmax = int(np.ceil((fmax - f0) / delta_f))
+        freqs = np.arange(fmin, fmax, delta_f)
+        line_shape = f_line_shape(freqs)
+
+        # Normalise and return
+        PSD_factor = N**2/8
+        norm = self.beta(f)*A**2 * PSD_factor
+        return idx_xmin, idx_xmax, norm*line_shape[:idx_xmax - idx_xmin]

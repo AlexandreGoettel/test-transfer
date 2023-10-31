@@ -77,7 +77,7 @@ def read_lpsd_sh(filename):
 
 
 def read(name, dtype=np.float64, n_lines=None,
-         delimiter="\t", raw_freq=True):
+         delimiter="\t", raw_freq=True, psd_column=1):
     """
     Read an output file from LPSD.
 
@@ -91,7 +91,7 @@ def read(name, dtype=np.float64, n_lines=None,
             try:
                 if raw_freq:
                     x += [float(row[0])]
-                y += [float(row[1])]
+                y += [float(row[psd_column])]
             except (ValueError, IndexError):
                 continue
     return np.array(x, dtype=dtype), np.array(y, dtype=dtype)
