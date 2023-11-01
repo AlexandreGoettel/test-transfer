@@ -201,11 +201,16 @@ class NoiseGenerator:
     def psd_from_spline(self):
         """Generate a function from pre-fitted spline data."""
         # Spline is defined between 10 and 8192 Hz
-        xKnots = np.array([2.30258509, 3.04941017, 3.79623525,
-                           8.65059825, 8.95399594, 8.97733423, 9.02401079])
-        yKnots = np.array([-91.80878694876485, -99.97801940114547, -103.57729069085298,
-                           -102.17121965438, -104.34025547329, -105.9256036217, -130.06995841416])
-
+        # H1:
+        # xKnots = np.array([2.30258509, 3.04941017, 3.79623525,
+        #                    8.65059825, 8.95399594, 8.97733423, 9.02401079])
+        # yKnots = np.array([-91.80878694876485, -99.97801940114547, -103.57729069085298,
+        #                    -102.17121965438, -104.34025547329, -105.9256036217, -130.06995841416])
+        # L1:
+        xKnots = np.array([2.30258509, 3.04941017, 3.79623525, 8.65059825,
+                           8.95399594, 8.97733423, 9.02401079])
+        yKnots = np.array([-91.64265596, -97.29276278, -101.0729336, -101.77673911,
+                           -105.56706334, -106.59332013, -107.01675492])
         def linspace_spline(x):
             # This is needed because the spline was fitted in log-log space
             return np.exp(CubicSpline(xKnots, yKnots, extrapolate=False)(np.log(x)))
@@ -282,8 +287,8 @@ class SignalGenerator:
         self.datafile = datafile
         # Open transfer function file for DM-amp conversion
         tf_dir = os.path.join(BASE_PATH, "scripts", "data", "transfer_functions")
-        tf_data = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LHO.txt"), delimiter="\t")
-        f_A_star = interp1d(tf_data["Freq_o"], tf_data["Amp_Cal_LHO"])
+        tf_data = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LLO.txt"), delimiter="\t")
+        f_A_star = interp1d(tf_data["Freq_Cal"], tf_data["amp_cal_LLO"])
 
         # Calculate beta
         rho_local = 0.4 / (constants.hbar / constants.e * 1e-7 * constants.c)**3  # to GeV^4
