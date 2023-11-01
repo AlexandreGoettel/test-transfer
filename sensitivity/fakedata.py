@@ -66,8 +66,11 @@ class DataManager:
         print("Injecting signals..")
         for freq, amp in tqdm(freq_amp_gen, total=N_gen,
                                 desc="Injection frequency", position=1, leave=False):
-            tqdm.write(f"AMP: {amp}")
-            start_idx, end_idx, signal = injector(freq, amp, dname=dname)
+            try:
+                start_idx, end_idx, signal = injector(freq, amp, dname=dname)
+            except AssertionError:
+                tqdm.write(f"Skipping f={freq} injection.. too close to valid bound.")
+                continue
             # Write to disk
             self.datafile[dname][start_idx:end_idx] += signal
 
@@ -360,6 +363,9 @@ class SignalGenerator:
         # idx = int(np.ceil((f - f0) / delta_f))
         idx_xmin = int(np.ceil((fmin - f0) / delta_f))
         idx_xmax = int(np.ceil((fmax - f0) / delta_f))
+        if idx_xmin == idx_xmax:  # If width is too small
+            idx_xmax += 1
+        assert idx_xmin < idx_xmax and idx_xmin > 0  # Protect against edge cases
         freqs = np.arange(fmin, fmax, delta_f)
         line_shape = f_line_shape(freqs)
 
