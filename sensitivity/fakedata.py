@@ -365,7 +365,7 @@ class SignalGenerator:
         idx_xmax = int(np.ceil((fmax - f0) / delta_f))
         if idx_xmin == idx_xmax:  # If width is too small
             idx_xmax += 1
-        assert idx_xmin < idx_xmax and idx_xmin > 0  # Protect against edge cases
+        assert idx_xmin < idx_xmax and idx_xmin > 0 and idx_xmax <= N  # Protect against edge case
         freqs = np.arange(fmin, fmax, delta_f)
         line_shape = f_line_shape(freqs)
 
