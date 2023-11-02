@@ -9,8 +9,6 @@ from scipy.integrate import quad
 from scipy.optimize import fsolve
 from scipy import constants
 import h5py
-# Phil imports
-from falsesignal import FalseSignal
 # Project imports
 import utils
 import fft
@@ -87,9 +85,9 @@ class DataManager:
         phase_data = np.random.random(size=len(freq_data)) * 2. * np.pi
         return freq_data * np.exp(1j * phase_data)
 
-    def strain_from_PSD(self, dname="PSD"):
+    def strain_from_PSD(self, dname_PSD="PSD"):
         """Generate strain data from PSD."""
-        dset_PSD = self.datafile[dname]
+        dset_PSD = self.datafile[dname_PSD]
         N = len(dset_PSD)
         delta_f, fs = dset_PSD.attrs["delta_f"], dset_PSD.attrs["sampling_frequency"]
         n_time = 2*N
@@ -133,8 +131,8 @@ class DataManager:
         else:
             print("Performing MEMORY iFFT..")
             fft.memory_FFT(n_time, n_time, self.nmax, self.datafile, self.datafile,
-                           dname, "complex_strain", reverse=True)
-            del self.datafile[dname]
+                           dname_ASD, "complex_strain", reverse=True)
+            del self.datafile[dname_ASD]
 
         # Save only real part
         # Imaginary parts should be negligible anyway
