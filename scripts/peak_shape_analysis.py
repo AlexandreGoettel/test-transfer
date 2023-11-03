@@ -1,4 +1,5 @@
 """Find out what peak shape the signals have in the LPSD spectrum. Compare with theory."""
+import csv
 import h5py
 from tqdm import tqdm
 import numpy as np
@@ -99,7 +100,16 @@ def compare_masks(pm_ref, pm_inj, verbose=False):
     return peak_start_idx, peak_end_idx
 
 
-def align_peaks(freq, psd, peak_idx_start, peak_idx_end,
+def get_injected_pos(x, idx_start, idx_end, injected_freqs):
+    """If an injected frequency is found within the bound, return it."""
+    # f_start, f_end = x[idx_start], x[idx_end]
+    candidates = injected_freqs[(injected_freqs >= x[idx_start]) & (injected_freqs < x[idx_end])]
+    if len(candidates) == 1:
+        return candidates[0]
+    return 0
+
+
+def align_peaks(freq, psd, peak_idx_start, peak_idx_end, injected_freqs,
                 _SUFFIX=30, _BUFFER=30, _OFFSET=5, _PREFIX=15, _CFD_FRAC=.95):
     """Align peaks using CFD."""
     assert peak_idx_end[0] > peak_idx_start[0]
@@ -107,6 +117,7 @@ def align_peaks(freq, psd, peak_idx_start, peak_idx_end,
     peak_data = np.zeros((len(peak_idx_end), max_peak_width+_SUFFIX+_PREFIX))
 
     # Use CFD to align peaks
+    peak_frequencies = np.zeros((2, len(peak_idx_end)))
     for i, (idx_start, idx_end) in enumerate(zip(peak_idx_start, peak_idx_end)):
         # 1. Add buffer to cover enough points
         dx = max_peak_width - (idx_end - idx_start)
@@ -123,14 +134,18 @@ def align_peaks(freq, psd, peak_idx_start, peak_idx_end,
         b = (x2*y1 - x1*y2) / (x2 - x1)
         x_cfd = (cfd_target - b) / a
         # 4. Align x_CFD over saved section
-        f = interp1d(freq[imin:imax], psd[imin:imax])
+        f = interp1d(freq[imin:imax], psd[imin:imax] - baseline)
 
         delta = (x_cfd - freq[idx_start]) / _OFFSET
         x = np.arange(freq[idx_start]-delta*_PREFIX,
                       freq[idx_start]+delta*(max_peak_width+_SUFFIX),
                       delta)
         peak_data[i, :] = f(x[:max_peak_width+_SUFFIX+_PREFIX])
-    return peak_data
+
+        # Find peak in injection file
+        peak_frequencies[0, i] = get_injected_pos(freq, idx_start, idx_end, injected_freqs)
+        peak_frequencies[1, i] = x[0]
+    return peak_data, peak_frequencies
 
 
 def main_v2(injection_path="injections/sine/injected_data_24.lpsd",
@@ -155,10 +170,19 @@ def main_v2(injection_path="injections/sine/injected_data_24.lpsd",
     }
 
     # Get data
+    injected_freqs = []
+    with open("data/injection_files/injections_full_1.0e-17.dat", "r") as _f:
+        data = csv.reader(_f, delimiter="\t")
+        for row in data:
+            if row:
+                injected_freqs.append(float(row[0]))
+    injected_freqs = np.array(injected_freqs)
+
     dfile_ref = h5py.File(sensutils.get_corrected_path(reference_path))
     x_inj, y_inj = utils.read(injection_path)
     x_ref, y_ref = dfile_ref["frequency"][()], dfile_ref["logPSD"][()]
     assert len(x_ref) == len(x_inj)
+
     # Correct for injection bug
     y_inj = 30.5 + np.log(y_inj)
     y_ref = 30.5 + y_ref
@@ -196,14 +220,31 @@ def main_v2(injection_path="injections/sine/injected_data_24.lpsd",
 
     # Get aligned peaks
     peak_start, peak_end = compare_masks(peak_mask_ref, peak_mask_inj)
-    peak_data = align_peaks(x_inj, y_inj, peak_start, peak_end, **kwargs_align)
+    peak_data, peak_freqs = align_peaks(x_inj, y_inj, peak_start, peak_end,
+                                        injected_freqs, **kwargs_align)
 
-    # Filter
-    peak_data = peak_data[peak_data[:, 20] > -100, :]
+    # Quick check if some injections were missed
+    missed_freqs = []
+    for freq in injected_freqs:
+        if freq not in peak_freqs[0, :]:
+            missed_freqs.append(freq)
+    score = 100*len(missed_freqs)/peak_freqs.shape[1]
+    print("Missed frequencies (Hz):", np.sort(missed_freqs))
+    print(f"Percentage of frequencies that were not recovered: {score:.2f}%")
+
+    # TMP
+    plt.figure()
+    m = peak_freqs[0, :] != 0
+    plt.plot((peak_freqs[0, m] - peak_freqs[1, m]) / peak_freqs[0, m])
+    plt.xlabel("(f_inj - x_0) / f_inj")
+
+    # Filter # TO TUNE # TODO
+    peak_data = peak_data[peak_data[:, 20] > 10, :]
 
     # Plot & fit
     mu = np.median(peak_data, axis=0)
     sigma = np.std(peak_data, ddof=1, axis=0)
+    plt.figure()
     ax = plt.subplot(111)
     x = np.arange(peak_data.shape[1])
 
@@ -217,18 +258,20 @@ def main_v2(injection_path="injections/sine/injected_data_24.lpsd",
     def fitFunc(x, A, mu, sigma, b):
         # return A/x/np.sqrt(2*np.pi)/sigma*np.exp(-0.5*((np.log(x) - mu) / sigma)**2) + b
         return A/np.sqrt(2*np.pi*sigma)*np.exp(-0.5*((x - mu) / sigma)**2) + b
-    popt, pcov = curve_fit(fitFunc, x[1:], mu[1:], p0=[35, 20, 0.64, -105],
-                           sigma=sigma[1:], absolute_sigma=True)
+    popt, _= curve_fit(fitFunc, x[1:], mu[1:], p0=[35, 20, 0.64, -105],
+                       sigma=sigma[1:], absolute_sigma=True)
 
     ax.plot(x, fitFunc(x, *popt), color="C2", label="Gaus fit", zorder=3)
-    mu, sigma = popt[1], popt[2]
 
     # Nice things
-    # ax.set_xscale("log")
     ax.set_xlabel("(a.u.)")
     ax.set_ylabel("ln(PSD)")
     ax.legend(loc="upper right")
     plt.show()
+
+    # Save normalised peak data
+    y = mu[12:35] / np.sum(mu[12:35])
+    np.save("peak_shape.npy", y)  # Use as template fit
 
 
 if __name__ == '__main__':
