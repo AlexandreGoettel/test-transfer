@@ -1,1 +1,6 @@
 *.btr
+*.npy
+*.npz
+*.h5
+*.csv
+data/*
