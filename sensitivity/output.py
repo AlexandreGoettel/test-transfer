@@ -27,7 +27,7 @@ def write_lpsd_sh(output_file=None, length=3600, sampling_frequency=16384,
         lpsd_output = os.path.join(os.getcwd(), lpsd_output)
 
     # What fmin can we support with data length?
-    fmin_from_length = int(1. + utils.get_fmin(length, resolution))
+    fmin_from_length = int(.5 + utils.get_fmin(length, resolution))
     if fmin_from_length > fmax:
         raise ValueError("Cannot find a valid configuration with this resolution and segment length!")
 
