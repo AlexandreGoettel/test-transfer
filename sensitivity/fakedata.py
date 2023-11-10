@@ -238,6 +238,7 @@ class NoiseGenerator:
             if last_non_nan - len(x):
                 x[last_non_nan+1:] = x[last_non_nan]
 
+            assert not any(np.isnan(x))
             # Normalise
             return x*(N)**2 / 16
         return extrapolator
@@ -306,25 +307,6 @@ class SignalGenerator:
         amplitude = (A * N)**2 / 8
         return idx, idx+1, np.ones(1) * amplitude
 
-    # def inject_DM(self, start_idx, end_idx, f, A):
-    #     """See inject_sine but mimic DM-like signal based on Phil's code."""
-    #     # The DM signal is the overlap of many sine waves
-    #     signal = FalseSignal(
-    #         frequency=f,
-    #         amplitude=A,
-    #         phase_seed=np.random.randint(2**31),
-    #         Nfreqs=500,
-    #         FWHM=1e-6,
-    #         day=np.random.randint(365)
-    #     )
-    #     output = np.zeros(end_idx - start_idx)
-    #     t = np.arange(start_idx, end_idx) / self.fs
-    #     for A, f, phase in tqdm(zip(signal["amplitudes"], signal["frequencies"], signal["phases"]),
-    #                             desc="DM freqs", total=500):
-    #         output += A * np.sin(2.*np.pi * f * t + phase)
-
-    #     return output
-    # TODO INJECT_DM_FROM_FREQ!
     def DM_line_shape(self, freq, remainder=1e-3):
         """
         Return interpolant to DM line shape, and bounds.
@@ -348,6 +330,10 @@ class SignalGenerator:
         N = 1000
         x = np.linspace(xmin, upper_bound_solved, 1000).reshape((N,))
         y = analytical_line_shape(x, tau, freq).reshape((N,))
+        if np.isnan(y[0]):
+            y[0] = 0  # Protect against float precision
+        if np.sum(np.isnan(y)) != 0:
+            raise ValueError("Injection function returned nan")
         return xmin, upper_bound_solved, interp1d(x, y)
 
     def inject_DM(self, f, A, dname="PSD"):
