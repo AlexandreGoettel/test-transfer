@@ -79,7 +79,7 @@ class DataManager:
     def process_chunk(self, start, end, delta_f, dset, dset_index, seed=42):
         """Simulate complex-valued fft output noise in frequency domain."""
         M = int((end - start) / delta_f)
-        freq_data = np.sqrt(2. * dset[dset_index:dset_index+M])  # PSD->ASD
+        freq_data = np.sqrt(dset[dset_index:dset_index+M])  # PSD->ASD
         # Give each freq. a random phase and use it to generate a complex signal
         np.random.seed(self.starting_seed + seed)
         phase_data = np.random.random(size=len(freq_data)) * 2. * np.pi
@@ -198,6 +198,7 @@ class NoiseGenerator:
         self.kwargs = kwargs
         self.nmax = kwargs["nmax"]  # How much to put in memory at one time
         self.datafile = datafile
+        self.fs = kwargs["sampling_frequency"]
 
     def psd_from_spline(self):
         """Generate a function from pre-fitted spline data."""
@@ -240,7 +241,7 @@ class NoiseGenerator:
 
             assert not any(np.isnan(x))
             # Normalise
-            return x*(N)**2 / 16
+            return x * N*self.fs / 2.
         return extrapolator
 
     def generate_psd(self, dname="PSD"):
@@ -354,6 +355,6 @@ class SignalGenerator:
         line_shape = f_line_shape(freqs)
 
         # Normalise and return
-        PSD_factor = N**2/8
-        norm = self.beta(f)*A**2 * PSD_factor
+        PSD_factor = N*self.fs / 2.
+        norm = 2*self.beta(f)*A**2 * PSD_factor
         return idx_xmin, idx_xmax, norm*line_shape[:idx_xmax - idx_xmin]
