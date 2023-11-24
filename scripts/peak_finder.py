@@ -347,7 +347,6 @@ class PeakFinder:
                 _count += 1
             _start = _previous
             _end, _previous = _count, _count
-
             # Whiten full data using _start and _end mapping
             mu, sigma, alpha = list(map(lambda f: f(i), interp_funcs))
             whitened_data[_start:_end] = norm.ppf(
@@ -527,9 +526,21 @@ class PeakFinder:
             plt.grid(linestyle="--", color="grey", alpha=.5)
 
             plt.figure()
-            plt.plot(X, Y - y_lines)
-            plt.title("Corrected data")
-            plt.grid(linestyle="--", color="grey", alpha=.5)
+            ax = plt.subplot(111)
+            ax.plot(np.exp(X), np.exp(Y - y_lines), label="Corrected PSD")
+            ax.plot(np.exp(X), np.exp(y_spline), label="Spline fit",
+                    linestyle="-.", linewidth=1.5)
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.grid(axis="y", linestyle="--", color="grey", alpha=.33, linewidth=1.5,
+                    which="major")
+            ax.grid(axis="x", linestyle="--", color="grey", alpha=.33, linewidth=1.5,
+                    which="both")
+            ax.minorticks_on()
+            ax.set_xlabel("Frequency (Hz)")
+            ax.set_ylabel("Power Spectral Density")
+            ax.legend(loc="upper right")
+            plt.tight_layout()
 
             plt.figure()
             plt.plot(X, bf[0]*X_sqr + bf[1]*X + bf[2])
