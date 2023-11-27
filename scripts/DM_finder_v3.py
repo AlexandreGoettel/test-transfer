@@ -1,7 +1,7 @@
 """q0-based significance search."""
 import os
 from multiprocessing import Pool
-from tqdm import tqdm, trange
+from tqdm import tqdm
 import h5py
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
@@ -38,10 +38,38 @@ def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
     return np.sum(np.sum(log_lkl, axis=1))  # Sum over f, then over ifo
 
 
+class PeakShape(np.ndarray):
+    """Hold peak shape (varies over freq.)"""
+
+    def __new__(cls, f, path, dtype=float, buffer=None, offset=0, strides=None, order=None):
+        peak_arrays = np.load(path)
+        shape = (peak_arrays["data"].shape[1],)
+        frequency_bounds = peak_arrays["bounds"]
+
+        obj = super(PeakShape, cls).__new__(cls, shape, dtype, buffer, offset, strides, order)
+        obj.f = np.array([f])
+        obj.frequency_bounds = frequency_bounds
+        obj.peak_shapes = peak_arrays["data"]
+        obj._update_array()
+        return obj
+
+    def _update_array(self):
+        """Update the array based on the value of f."""
+        condition = np.where(self.f > self.frequency_bounds)[0]
+        idx = 0 if condition.size == 0 else condition[-1] + 1
+        np.copyto(self, self.peak_shapes[idx, :])
+
+    def update_freq(self, f):
+        """Update the frequency value (and as such the peak shape array if necessary)."""
+        self.f = np.array([f])
+        self._update_array()
+
+
 class DMFinder:
     """Hold DM-finding related options."""
 
-    def __init__(self, data_path=None, dname=None, dname_freq=None, **kwargs):
+    def __init__(self, data_path=None, dname=None, dname_freq=None,
+                 peak_shape_path=None, **kwargs):
         """Initialise necessarily shared variables and prep data."""
         # Init variables
         self.kwargs = kwargs
@@ -49,9 +77,7 @@ class DMFinder:
                                 * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
 
         # Generate peak shape
-        # TODO: REPLACE WITH INJECTION-FIT TEMPLATE
-        self.peak_shape = np.load("../sensitivity/peak_shape.npy")
-        self.peak_shape /= np.sum(self.peak_shape)
+        self.peak_shape = PeakShape(0, peak_shape_path)
         self.len_peak = len(self.peak_shape)
 
         # Read data & TF info
@@ -120,6 +146,7 @@ def make_args(fndr, fmin, fmax, pruning=1):
         if not Y:
             continue
         Y, bkg, model_args, peak_norm = list(map(np.array, [Y, bkg, model_args, peak_norm]))
+        fndr.peak_shape.update_freq(freq_Hz[0])
         yield Y, bkg, model_args, peak_norm, fndr.peak_shape, freq_Hz[0], ifos
 
 
@@ -330,10 +357,14 @@ def main(injection_file=None, n_processes=4, pruning=1,
     plt.show()
 
 
+# TODO: argparse (use gpt)
 if __name__ == '__main__':
     main(data_path="../sensitivity/MC.h5",
+         peak_shape_path="peak_shape_data.npz",
          injection_file="../sensitivity/data/injections/injections_full_1.0e-19.dat",
          dname="injection_1e-17",
          dname_freq="frequencies",
-         n_processes=4
+         n_processes=4,
+         pruning=16,
+         verbose=True
          )
