@@ -41,10 +41,9 @@ def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
 class DMFinder:
     """Hold DM-finding related options."""
 
-    def __init__(self, data_path=None, dname=None, **kwargs):
+    def __init__(self, data_path=None, dname=None, dname_freq=None, **kwargs):
         """Initialise necessarily shared variables and prep data."""
         # Init variables
-        self.dname = dname
         self.kwargs = kwargs
         self.rho_local = 0.4 / (constants.hbar / constants.e
                                 * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
@@ -59,13 +58,10 @@ class DMFinder:
         self.transfer_functions, self.f_A_star = self.get_f_A_star()
         self.dfile = h5py.File(data_path, "r")
         self.dset = self.dfile[dname]
-        # self.dset, self.fset = self.read_MC_data() if isMC else self.read_real_data()
+        self.freqs = self.dfile[dname_freq]
 
     def __del__(self):
         """Close HDF properly."""
-        if hasattr(self, "data_info"):
-            for [dfile, _, _] in self.data_info:
-                dfile.close()
         if hasattr(self, "dfile") and self.dfile:
             self.dfile.close()
 
@@ -92,13 +88,13 @@ class DMFinder:
         return transfer_functions, f_A_star
 
 
-def make_args(fndr, fmin, fmax):
+def make_args(fndr, fmin, fmax, pruning=1):
     """Return a generator to q0 calculation args between fmin and fmax."""
-    frequencies = fndr.dfile["frequencies"][:]
+    frequencies = fndr.freqs
     idx_min = sensutils.binary_search(frequencies, fmin)
     idx_max = 1 + sensutils.binary_search(frequencies, fmax)
 
-    for idx in range(idx_min, idx_max):
+    for idx in range(idx_min, idx_max, pruning):
         Y, bkg, model_args, peak_norm, ifos = [], [], [], [], []
 
         freq_Hz = frequencies[idx:idx + fndr.len_peak]
@@ -191,9 +187,6 @@ def plot_candidate(Y, bkg, mu, peak_norm, peak_shape, ifos):
         ax.grid(linestyle="--", linewidth=1, color="grey", alpha=.33)
     axL1.set_ylabel("log(PSD)")
     axL1.set_yticklabels([])
-    # axH1.set_ylim(max(np.log(peak_norm*mu*peak_shape)) - 5,
-    #                 axH1.get_ylim()[1])
-    # axL1.set_ylim(axH1.get_ylim())
     axH1.set_yscale("log")
     return axH1, axL1
 
@@ -220,7 +213,7 @@ def get_q0(Y, bkg, model_args, peak_norm, peak_shape,
                     tol=1e-10)
     max_lkl, zero_lkl = -popt.fun, log_lkl([0])
     # Debugging
-    if verbose or np.sqrt(popt.x[0]) > 5e-17:
+    if verbose:  # or np.sqrt(popt.x[0]) > 5e-17:
         plt.figure()
         ax = plt.subplot(111)
         ax.set_xscale("log")
@@ -246,56 +239,67 @@ def process_q0(args):
     return freqs, zero_lkl, max_lkl, mu
 
 
-def main(injection_file=None, n_processes=4, **kwargs):
+def main(injection_file=None, n_processes=4, pruning=1,
+         fmin=10, fmax=5000, verbose=False, **kwargs):
     """Coordinate q0 analysis."""
     # Get data (MC or Real)
     fndr = DMFinder(**kwargs)
-    pruning = 1
-    # TODO: If no injection, input fmin, fmax from exterior for condor prep
-    # fmin, fmax = None, None
-    # For now, Else:
+    if injection_file is None:
+        # Run data-like job
+        args = make_args(fndr, fmin, fmax, pruning)
 
-    # Fill args for parallel lkl min
-    injData = np.atleast_2d(utils.safe_loadtxt(injection_file, dtype=float))
-    def full_args():
-        for freq in tqdm(injData[:len(injData)//pruning, 0], desc="Prep args"):
-            fmin, fmax = freq*(1 + 1e-6)**(-10), freq*(1 + 1e-6)**10
-            for arg in make_args(fndr, fmin, fmax):
-                yield arg
+        results = []
+        with Pool(n_processes) as pool:
+            with tqdm(total=fndr.dset.shape[0]//pruning, position=0,
+                      desc="q0 calc.", leave=True) as pbar:
+                for result in pool.imap(process_q0, args):
+                    results.append(result)
+                    pbar.update(1)
+    else:
+        # Run injection-like job
+        # Fill args for parallel lkl min
+        injData = np.atleast_2d(utils.safe_loadtxt(injection_file, dtype=float))
+        def full_args():
+            for freq in tqdm(injData[:len(injData)//pruning, 0], desc="Prep args"):
+                fmin, fmax = freq*(1 + 1e-6)**(-10), freq*(1 + 1e-6)**10
+                for arg in make_args(fndr, fmin, fmax):
+                    yield arg
 
-    # Run parallel job
-    # results = []
-    # args = list(full_args())
-    # print("Starting q0 calculation..")
-    # with Pool(n_processes) as pool:
-    #     with tqdm(total=injData.shape[0]*20//pruning, position=0,
-    #               desc="q0 calc.", leave=True) as pbar:
-    #         for result in pool.imap(process_q0, (arg for arg in args)):
-    #                             #    chunksize=20):
-    #             results.append(result)
-    #             pbar.update(1)
+        # Run parallel job
+        results = []
+        args = list(full_args())
+        print("Starting q0 calculation..")
+        with Pool(n_processes) as pool:
+            with tqdm(total=injData.shape[0]*20//pruning, position=0,
+                    desc="q0 calc.", leave=True) as pbar:
+                for result in pool.map(process_q0, args):#(arg for arg in args)):
+                                    #    chunksize=20):
+                    results.append(result)
+                    pbar.update(1)
 
-    # # Merge results
-    # q0_data = np.zeros((len(results), 4))
-    # for i, result in enumerate(results):
-    #     q0_data[i, :] = result  # freqs, zero_lkl, max_lkl, mu
-    # np.save("q0_data.npy", q0_data)
-    q0_data = np.load("q0_data.npy")
+    # Merge results
+    q0_data = np.zeros((len(results), 4))
+    for i, result in enumerate(results):
+        q0_data[i, :] = result  # freqs, zero_lkl, max_lkl, mu
+    np.save("q0_data.npy", q0_data)
+    # q0_data = np.load("q0_data.npy")
 
     # Plot
+    if not verbose:
+        return
     pos_mu = q0_data[:, 3] > 0
     q0 = np.zeros(q0_data.shape[0])
     q0[pos_mu] = -2*(q0_data[:,   1][pos_mu] - q0_data[:, 2][pos_mu])
 
+    # q0 vs frequency
     ax = plt.subplot(111)
     ax.set_xscale("log")
     idx = np.argsort(q0_data[:, 0])
     ax.plot(q0_data[idx, 0], np.sqrt(q0[idx]))
-    # for freq in injData[:len(injData)//pruning, 0]:
-    #     ax.axvline(freq, linestyle="--", linewidth=.5, color="r")
     ax.set_title("Z")
     ax.set_ylim(0, ax.get_ylim()[1])
 
+    # hat(mu) vs frequency
     plt.figure()
     ax = plt.subplot(111)
     ax.set_xscale("log")
@@ -304,6 +308,10 @@ def main(injection_file=None, n_processes=4, **kwargs):
     ax.axhline(1e-17, color="r", linestyle="--", zorder=2, linewidth=2)
     ax.set_title("Lambda_i^-1")
 
+    # Injection sanity check
+    if injection_file is None:
+        plt.show()
+        return
     plt.figure()
     post_mask = np.zeros(len(q0), dtype=bool)
     for freq in injData[:len(injData)//pruning, 0]:
@@ -314,7 +322,8 @@ def main(injection_file=None, n_processes=4, **kwargs):
         post_mask[fmin_idx:fmin_idx+10] = 1
     ax = plt.subplot(111)
     ax.set_yscale("log")
-    _, bins, _ = ax.hist(np.sqrt(q0[idx][~post_mask]), 200, histtype="step", color="C0", label="pre-peak")
+    _, bins, _ = ax.hist(np.sqrt(q0[idx][~post_mask]), 200, histtype="step",
+                         color="C0", label="pre-peak")
     ax.hist(np.sqrt(q0[idx][post_mask]), bins, histtype="step", color="C1", label="post-peak")
     ax.legend(loc="upper right")
     ax.set_title("q_0 for injections sanity check")
@@ -325,5 +334,6 @@ if __name__ == '__main__':
     main(data_path="../sensitivity/MC.h5",
          injection_file="../sensitivity/data/injections/injections_full_1.0e-19.dat",
          dname="injection_1e-17",
-         n_processes=10
+         dname_freq="frequencies",
+         n_processes=4
          )
