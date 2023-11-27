@@ -1,7 +1,9 @@
 """q0-based significance search."""
 import os
+import glob
+import argparse
 from multiprocessing import Pool
-from tqdm import tqdm
+from tqdm import tqdm, trange
 import h5py
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
@@ -13,9 +15,37 @@ from matplotlib.gridspec import GridSpec
 # Project imports
 import utils
 import sensutils
+import models
 
 
 BASE_PATH = os.path.split(os.path.abspath(__file__))[0]
+
+
+def parse_cmdl_args():
+    """Parse cmdl args to pass to main."""
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    # Add arguments
+    parser.add_argument("--data-path", type=str, required=True,
+                        help="Path to the MC/data input file.")
+    parser.add_argument("--json-path", type=str, required=False,
+                        help="Path to the post-processing json file.")
+    parser.add_argument("--peak-shape-path", type=str, required=True,
+                        help="Path to the peak_shape_data.npz file.")
+    parser.add_argument("--injection-file", type=str, required=False,
+                        help="Path to the injections file.")
+    parser.add_argument("--dname", type=str, required=True, help="Name of the PSD dataset.")
+    parser.add_argument("--dname-freq", type=str, required=True,
+                        help="Name of the frequency dataset.")
+    parser.add_argument("--n-processes", type=int, default=4, help="Number of processes to use.")
+    parser.add_argument("--pruning", type=int, default=1,
+                        help="Pruning level. Default is 1 (None).")
+    parser.add_argument("--max-chi", type=int, default=10,
+                        help="Maximum chi^2 deviation to skew norm fit in a chunk.")
+    parser.add_argument("--verbose", action='store_true')
+    parser.add_argument("--isMC", action="store_true")
+    parser.add_argument("--regenerate-data-file", action="store_true")
+    return vars(parser.parse_args())
 
 
 def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
@@ -68,11 +98,13 @@ class PeakShape(np.ndarray):
 class DMFinder:
     """Hold DM-finding related options."""
 
-    def __init__(self, data_path=None, dname=None, dname_freq=None,
-                 peak_shape_path=None, **kwargs):
+    def __init__(self, data_path=None, json_path=None, dname=None,
+                 isMC=False, peak_shape_path=None, dname_freq=None,
+                 regenerate_data_file=True, max_chi=10, **kwargs):
         """Initialise necessarily shared variables and prep data."""
         # Init variables
         self.kwargs = kwargs
+        self.max_chi = max_chi
         self.rho_local = 0.4 / (constants.hbar / constants.e
                                 * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
 
@@ -82,12 +114,19 @@ class DMFinder:
 
         # Read data & TF info
         self.transfer_functions, self.f_A_star = self.get_f_A_star()
-        self.dfile = h5py.File(data_path, "r")
+        if isMC or not regenerate_data_file:
+            self.dfile = h5py.File(data_path, "r")
+        else:
+            self.data_info = self.get_info_from_data_path(data_path, json_path)
+            self.dfile = self.dfile_from_data(data_path, dname, dname_freq)
         self.dset = self.dfile[dname]
         self.freqs = self.dfile[dname_freq]
 
     def __del__(self):
         """Close HDF properly."""
+        if hasattr(self, "data_info"):
+            for dfile, _, _ in self.data_info:
+                dfile.close()
         if hasattr(self, "dfile") and self.dfile:
             self.dfile.close()
 
@@ -95,9 +134,77 @@ class DMFinder:
         """Parse the ifo from the dset attr at index i."""
         return self.dset.attrs[str(i)].split("_")[-1]
 
-    def read_real_data(self):
-        """Read from a real data repo."""
-        pass  # TODO
+    def get_info_from_data_path(self, data_path, json_path):
+        """Get all possible info from result files in data_path and json_path."""
+        data_paths = sorted(list(glob.glob(os.path.join(data_path, "result*"))))
+        data_info = []
+        for _data_path in tqdm(data_paths, desc="Opening data HDFs", leave=False):
+            _data_info = []
+            _data_info.append(h5py.File(sensutils.get_corrected_path(_data_path), "r"))
+            ifo = sensutils.parse_ifo(_data_path)
+            _data_info.append(ifo)
+            df_key = "splines_" + sensutils.get_df_key(_data_path)
+            _data_info.append(sensutils.get_results(df_key, json_path))
+            assert _data_info[-1] is not None
+            # _data_info.append(df_key)
+            data_info.append(_data_info)
+
+        return data_info
+
+    def dfile_from_data(self, data_path, dname, dname_freq):
+        """Create dfile by combining available data through data_info."""
+        dfile = h5py.File(os.path.join(data_path, "tmp.h5"), "w")
+        # Get PSD/freq shape
+        # Using min because the difference in the frequencies between the different files
+        # should only be a single bin anyway (last bin)
+        psd_length = min([len(inf[0][dname_freq]) for inf in self.data_info])
+        dset = dfile.create_dataset(dname, (psd_length, len(self.data_info)),
+                                    dtype=np.float64)
+        # Get frequencies
+        for inf in self.data_info:
+            if len(inf[0][dname_freq]) == psd_length:
+                dfile.create_dataset(dname_freq, data=inf[0][dname_freq][:])
+                break
+        # Metadata
+        bkg = dfile.create_dataset("bkg", (psd_length, len(self.data_info)),
+                                   dtype=np.float64)
+        model_args = dfile.create_dataset("model_args", (psd_length, len(self.data_info), 3),
+                                          dtype=np.float64)
+
+        # Fill data dset
+        df_columns = ["fmin", "fmax", "x_knots", "y_knots",
+                      "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
+        for i, (hdf_path, ifo, df) in enumerate(
+                tqdm(self.data_info, desc="Fill dset.", leave=False)):
+            dset[:, i] = hdf_path["logPSD"][:psd_length]
+            dset.attrs[str(i)] = ifo
+
+            for _, row in df.iterrows():
+                fmin, fmax, x_knots, y_knots, alpha_skew, loc_skew, sigma_skew, chi_sqr\
+                    = row[df_columns]
+                if chi_sqr >= self.max_chi:
+                    continue
+
+                # Get frequency indices
+                frequencies = hdf_path["frequency"]
+                idx_min = sensutils.binary_search(frequencies, fmin)
+                idx_max = sensutils.binary_search(frequencies, fmax)
+
+                # Get backgound model
+                spline = models.model_xy_spline(
+                    np.concatenate([x_knots, y_knots]), extrapolate=True)(
+                        np.log(frequencies[idx_min:idx_max+1]))
+
+                # Write to disk
+                bkg[idx_min:idx_max+1, i] = spline
+                for j, val in enumerate([alpha_skew, loc_skew, sigma_skew]):
+                    model_args[idx_min:idx_max+1, i, j] = val
+
+        # Clean dataset (loop to avoid excessive memory usage)
+        for j in trange(dset.shape[1], desc="Cleaning"):
+            dset[dset[:, j] == 0, j] = np.nan
+
+        return dfile
 
     def get_f_A_star(self):
         """Get dicts of transfer function info."""
@@ -357,14 +464,12 @@ def main(injection_file=None, n_processes=4, pruning=1,
     plt.show()
 
 
-# TODO: argparse (use gpt)
 if __name__ == '__main__':
-    main(data_path="../sensitivity/MC.h5",
-         peak_shape_path="peak_shape_data.npz",
-         injection_file="../sensitivity/data/injections/injections_full_1.0e-19.dat",
-         dname="injection_1e-17",
-         dname_freq="frequencies",
-         n_processes=4,
-         pruning=16,
-         verbose=True
-         )
+    main(**parse_cmdl_args())
+
+# Example of running on MC injection: python DM_finder_v3.py --data-path ../sensitivity/MC.h5 --isMC --injection-file ../sensitivity/data/injections/injections_full_1.0e-17.dat --peak-shape-path peak_shape_data.npz --dname injection_1e-17 --dname-freq frequencies --pruning 8 --verbose
+# Example of running on data: python DM_finder_v3.py --data-path data/tmp.h5 --json-path data/processing_results.json --peak-shape-pa
+# th peak_shape_data.npz --dname PSD --dname-freq frequency --pruning 8 --verbose
+
+# Careful, data-path must be a dict if --regenerate-data-file is used, example:
+# python DM_finder_v3.py --data-path data --json-path data/processing_results.json --peak-shape-path peak_shape_data.npz --dname PSD --dname-freq frequency --pruning 8 --verbose --regenerate-data-file
