@@ -253,7 +253,7 @@ def make_args(fndr, fmin, fmax, pruning=1):
         if not Y:
             continue
         Y, bkg, model_args, peak_norm = list(map(np.array, [Y, bkg, model_args, peak_norm]))
-        fndr.peak_shape.update_freq(freq_Hz[0])
+        fndr.peak_shape.update_freq(freq_Hz[fndr.len_peak//2])
         yield Y, bkg, model_args, peak_norm, fndr.peak_shape, freq_Hz[0], ifos
 
 
@@ -317,7 +317,7 @@ def plot_candidate(Y, bkg, mu, peak_norm, peak_shape, ifos):
         # Nice things
         ax.set_title(ifo + r", $\Lambda_i^{-1}$:" +
                         f" {np.sqrt(mu):.1e}")
-        ax.set_xlabel("Frequency (Hz)")
+        ax.set_xlabel("Frequency a.u.")
         ax.grid(linestyle="--", linewidth=1, color="grey", alpha=.33)
     axL1.set_ylabel("log(PSD)")
     axL1.set_yticklabels([])
@@ -334,9 +334,9 @@ def get_q0(Y, bkg, model_args, peak_norm, peak_shape,
     # Get initial guess
     test_mus = np.logspace(min_log10mu, max_log10mu, 1000)
     test_lkl = np.array([-log_lkl([mu]) for mu in test_mus])
-    if not any(~np.isnan(test_lkl)):
-        return np.nan, np.nan, np.nan
     mask = np.isnan(test_lkl) | np.isinf(test_lkl)
+    if not any(~mask):
+        return 0, 0, 0
     initial_guess = test_mus[np.argmin(test_lkl[~mask])]
 
     # Calculate max lkl
@@ -348,6 +348,7 @@ def get_q0(Y, bkg, model_args, peak_norm, peak_shape,
     max_lkl, zero_lkl = -popt.fun, log_lkl([0])
     # Debugging
     if verbose:  # or np.sqrt(popt.x[0]) > 5e-17:
+    # if np.sqrt(popt.x[0]) > 5e-18:
         plt.figure()
         ax = plt.subplot(111)
         ax.set_xscale("log")
@@ -395,7 +396,7 @@ def main(injection_file=None, n_processes=4, pruning=1,
         injData = np.atleast_2d(utils.safe_loadtxt(injection_file, dtype=float))
         def full_args():
             for freq in tqdm(injData[:len(injData)//pruning, 0], desc="Prep args"):
-                fmin, fmax = freq*(1 + 1e-6)**(-10), freq*(1 + 1e-6)**10
+                fmin, fmax = freq*(1 + 1e-6)**(-25), freq*(1 + 1e-6)**(-5)
                 for arg in make_args(fndr, fmin, fmax):
                     yield arg
 
@@ -406,8 +407,8 @@ def main(injection_file=None, n_processes=4, pruning=1,
         with Pool(n_processes) as pool:
             with tqdm(total=injData.shape[0]*20//pruning, position=0,
                     desc="q0 calc.", leave=True) as pbar:
-                for result in pool.map(process_q0, args):#(arg for arg in args)):
-                                    #    chunksize=20):
+                for result in pool.imap(process_q0, (arg for arg in args),
+                                        chunksize=20):
                     results.append(result)
                     pbar.update(1)
 
@@ -468,8 +469,7 @@ if __name__ == '__main__':
     main(**parse_cmdl_args())
 
 # Example of running on MC injection: python DM_finder_v3.py --data-path ../sensitivity/MC.h5 --isMC --injection-file ../sensitivity/data/injections/injections_full_1.0e-17.dat --peak-shape-path peak_shape_data.npz --dname injection_1e-17 --dname-freq frequencies --pruning 8 --verbose
-# Example of running on data: python DM_finder_v3.py --data-path data/tmp.h5 --json-path data/processing_results.json --peak-shape-pa
-# th peak_shape_data.npz --dname PSD --dname-freq frequency --pruning 8 --verbose
+# Example of running on data: python DM_finder_v3.py --data-path data/tmp.h5 --json-path data/processing_results.json --peak-shape-path peak_shape_data.npz --dname PSD --dname-freq frequency --pruning 8 --verbose
 
 # Careful, data-path must be a dict if --regenerate-data-file is used, example:
 # python DM_finder_v3.py --data-path data --json-path data/processing_results.json --peak-shape-path peak_shape_data.npz --dname PSD --dname-freq frequency --pruning 8 --verbose --regenerate-data-file
