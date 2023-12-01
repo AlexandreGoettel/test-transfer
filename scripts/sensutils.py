@@ -3,6 +3,7 @@ import os
 import csv
 import json
 import warnings
+from io import StringIO
 from tqdm import tqdm
 from findiff import FinDiff
 import numpy as np
@@ -12,6 +13,9 @@ from scipy.special import erf
 from scipy.stats import norm, skew, skewnorm
 from scipy.signal import convolve
 from scipy.interpolate import interp1d
+
+
+_LOG_2_PI_TERM = np.log(2) - 0.5 * np.log(2 * np.pi)
 
 
 def sigma_at_point(func, point, initial_dx=1e-5, tolerance=1e-6, max_iterations=100):
@@ -156,7 +160,24 @@ def logpdf_skewnorm(x, alpha, loc=0, scale=1):
     """Implement skewnorm.logpdf for speed."""
     norm_term = -0.5*((x - loc) / scale)**2
     skew_term = np.log(0.5*(1. + erf(alpha*(x - loc) / (np.sqrt(2)*scale))))
-    return np.log(2) - 0.5*np.log(2*np.pi) + norm_term + skew_term
+    return _LOG_2_PI_TERM + norm_term + skew_term
+
+
+def pdf_norm(x, loc=0, scale=1):
+    """Implement Gaus PDF."""
+    return np.sqrt(1. / (2*np.pi*scale**2)) * np.exp(-0.5*((x - loc) / scale)**2)
+
+
+def logpdf_skewnorm_vec(x, alpha, loc, scale):
+    """Implement vectorized skewnorm.logpdf for speed."""
+    # Ensure alpha, loc, and scale are broadcastable with residuals
+    alpha = np.expand_dims(alpha, axis=-1)
+    loc = np.expand_dims(loc, axis=-1)
+    scale = np.expand_dims(scale, axis=-1)
+
+    norm_term = -0.5 * ((x - loc) / scale) ** 2
+    skew_term = np.log(0.5 * (1. + erf(alpha * (x - loc) / (np.sqrt(2) * scale))))
+    return _LOG_2_PI_TERM + norm_term + skew_term
 
 
 def get_results(name, JSON_FILE):
@@ -173,7 +194,7 @@ def get_results(name, JSON_FILE):
         return None
 
     # Convert the JSON object back to DataFrame
-    return pd.read_json(json_df)
+    return pd.read_json(StringIO(json.dumps(json_df)))
 
 
 def del_df_from_json(dname, JSON_FILE):
