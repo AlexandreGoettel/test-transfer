@@ -48,8 +48,7 @@ def parse_cmdl_args():
 
 def write_submit_wrapper(script_path, start_iter=0):
     """Write the condor submit executable - wrapping around the python script."""
-    _str = f"""
-#!/bin/bash
+    _str = f"""#!/bin/bash
 
 # The iteration number is passed by HTCondor as the process number
 ITERATION=$(({start_iter} + $1))
@@ -61,12 +60,12 @@ python {script_path} --iteration $ITERATION --n-processes $2 --prefix $3 --peak-
 
 
 def write_submit_file(N_jobs, request_cpus, path_to_wrapper,
-                      prefix, out_prefix, peak_shape_path):
+                      prefix, out_prefix, peak_shape_path, n_processes):
     """Write the condor submit file for DM hunting jobs."""
     _str = f"""
 Universe = vanilla
 Executable = {path_to_wrapper}
-Arguments = $(Process) $(NUM_CPUS) {os.path.split(prefix)[-1]} {os.path.split(peak_shape_path)[-1]}
+Arguments = $(Process) {n_processes} {os.path.split(prefix)[-1]} {os.path.split(peak_shape_path)[-1]}
 request_cpus = {request_cpus}
 transfer_input_files = {prefix}_$(Process).npz {peak_shape_path}
 accounting_group = aluk.dev.o4.cw.darkmatter.lpsd
@@ -130,7 +129,7 @@ def main(prefix=None, rundir=None, fmin=10, fmax=5000, freqs_per_job=35000,
     writefile(write_submit_wrapper(path_to_executable, start_iter),
               path_to_wrapper)
     writefile(write_submit_file(len(starting_indices), n_processes, path_to_wrapper,
-                                prefix, run_prefix, kwargs["peak_shape_path"]),
+                                prefix, run_prefix, kwargs["peak_shape_path"], n_processes),
               path_to_submitfile)
     print(f"Wrote submit files to {path_to_wrapper} and {path_to_submitfile}.")
 
