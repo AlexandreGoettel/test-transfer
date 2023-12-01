@@ -69,7 +69,7 @@ Executable = {path_to_wrapper}
 Arguments = $(Process) $(NUM_CPUS) {os.path.split(prefix)[-1]} {os.path.split(peak_shape_path)[-1]}
 request_cpus = {request_cpus}
 transfer_input_files = {prefix}_$(Process).npz {peak_shape_path}
-accounting_group = aluk.ligo.dev.o3.cw.darkmatter.lpsd
+accounting_group = aluk.ligo.devd.o4.cw.darkmatter.lpsd
 request_disk = 1 GB
 request_memory = 4 GB
 
