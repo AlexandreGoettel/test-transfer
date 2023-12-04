@@ -127,7 +127,7 @@ def make_args(Y, frequencies, peak_shape, reco_model_args, reco_knots,
             # Get spline from knots
             _bkg = np.zeros(len_peak)
             for k in range(len_peak):
-                x_knots, y_knots = reco_knots[j][i+k, 0, :], reco_knots[j][i+k, 1, :]
+                x_knots, y_knots = reco_knots[j][i+k][0], reco_knots[j][i+k][1]
                 _bkg[k] = models.model_xy_spline(
                     np.concatenate([x_knots, y_knots]), extrapolate=True)(
                         np.log(frequencies[i+k])
@@ -182,7 +182,7 @@ def main(rundir="", outdir="", iteration=0, prefix="", n_processes=1, peak_shape
 
 
         reco_model_args.append(np.array(_reco_model_args))
-        reco_knots.append(np.array(_reco_knots))
+        reco_knots.append(_reco_knots)
 
     # Derived variables
     len_peak = len(peak_shape)
