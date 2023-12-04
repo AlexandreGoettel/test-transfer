@@ -65,7 +65,7 @@ def write_submit_file(N_jobs, request_cpus, path_to_wrapper,
     _str = f"""
 Universe = vanilla
 Executable = {path_to_wrapper}
-Arguments = $(Process) {n_processes} {os.path.split(prefix)[-1]} {os.path.split(peak_shape_path)[-1]}
+Arguments = $(Process) {n_processes} {prefix} {peak_shape_path}
 request_cpus = {request_cpus}
 transfer_input_files = {prefix}_$(Process).npz {peak_shape_path}
 accounting_group = aluk.dev.o4.cw.darkmatter.lpsd
