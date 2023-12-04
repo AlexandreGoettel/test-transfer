@@ -297,39 +297,38 @@ def make_args(fndr, fmin, fmax, isMC=False):
                     np.log(np.exp(Y[fmin_idx:fmax_idx, i]) +
                             beta[fmin_idx:fmax_idx]*amp*fndr.peak_shape)
 
-    # # Compress idx_freq_to_df
-    # def append_data(_row, _args, _knots, _rowval, _argval, _knotval):
-    #     _row.append(_rowval)
-    #     _args.append(_argval)
-    #     _knots.append(_knotval)
+    # Compress idx_freq_to_df
+    def append_data(_row, _args, _knots, _rowval, _argval, _knotval):
+        _row.append(_rowval)
+        _args.append(_argval)
+        _knots.append(_knotval)
 
-    # compressed_idx_freq_to_df, compressed_args, compressed_knots = [], [], []
-    # for j in range(idx_freq_to_df.shape[0]):  # N_segments
-    #     compressed_row, _compressed_args, _compressed_knots = [], [], []
-    #     current_val, count = None, 0
+    compressed_idx_freq_to_df, compressed_args, compressed_knots = [], [], []
+    for j in range(idx_freq_to_df.shape[0]):  # N_segments
+        compressed_row, _compressed_args, _compressed_knots = [], [], []
+        current_val, count = None, 0
 
-    #     for i, val in enumerate(idx_freq_to_df[j, :]):  # freqs
-    #         if val != current_val:  # New df
-    #             if i > 0:
-    #                 append_data(compressed_row, _compressed_args, _compressed_knots,
-    #                             [current_val, count], current_args, current_knots)
-    #             current_val, count = val, 1
-    #             current_knots, current_args = unique_knots[j, i, ...], unique_model_args[j, i, :]
-    #         else:
-    #             count += 1
-    #     # Update current values and append to global idx data
-    #     append_data(compressed_row, _compressed_args, _compressed_knots,
-    #                 [current_val, count], current_args, current_knots)
-    #     append_data(compressed_idx_freq_to_df, compressed_args, compressed_knots,
-    #                 compressed_row, _compressed_args, _compressed_knots)
+        for i, val in enumerate(idx_freq_to_df[j, :]):  # freqs
+            if val != current_val:  # New df
+                if i > 0:
+                    append_data(compressed_row, _compressed_args, _compressed_knots,
+                                [current_val, count], current_args, current_knots)
+                current_val, count = val, 1
+                current_knots, current_args = unique_knots[j, i, ...], unique_model_args[j, i, :]
+            else:
+                count += 1
+        # Update current values and append to global idx data
+        append_data(compressed_row, _compressed_args, _compressed_knots,
+                    [current_val, count], current_args, current_knots)
+        append_data(compressed_idx_freq_to_df, compressed_args, compressed_knots,
+                    compressed_row, _compressed_args, _compressed_knots)
+
     return dict(Y=Y, beta_H1=beta_H1, beta_L1=beta_L1, ifos=ifos,
                 fmin=freq_Hz[0], fmax=freq_Hz[-1],
-                model_args=unique_model_args,
-                knots=unique_knots)
-                # model_args=np.array(compressed_args),
-                # knots=np.array(compressed_knots),
-                # idx_compression=np.array(compressed_idx_freq_to_df)
-                # )
+                compressed_args=compressed_args,
+                compressed_knots=compressed_knots,
+                compressed_idx_freq_to_df=compressed_idx_freq_to_df
+                )
 
 
 def create_job_args(prefix, fmin=10, fmax=5000, isMC=False, **kwargs):
@@ -342,7 +341,13 @@ def create_job_args(prefix, fmin=10, fmax=5000, isMC=False, **kwargs):
     for i, (_fmin, _fmax) in enumerate(tqdm(zip(fmin, fmax),
                                             desc="Filling args.", total=len(fmin))):
         args = make_args(fndr, _fmin, _fmax, isMC)
-        np.savez(f"{prefix}_{i}.npz", **args)
+        args_np = {key: val for key, val in args.items()
+                   if key in ["Y", "beta_H1", "beta_L1", "ifos", "fmin", "fmax"]}
+        for compression_key in "args", "knots", "idx_freq_to_df":
+            for j, el in enumerate(args[f"compressed_{compression_key}"]):
+                args_np[f"compressed_{compression_key}_{j}"] = el
+
+        np.savez(f"{prefix}_{i}.npz", **args_np)
 
 
 if __name__ == '__main__':

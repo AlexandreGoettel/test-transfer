@@ -112,19 +112,19 @@ def make_args(Y, frequencies, peak_shape, reco_model_args, reco_knots,
     """Generator for process_q0."""
     len_peak = len(peak_shape)
     for i in trange(len(frequencies) - len_peak, desc="Prep. args"):
-        _Y = Y[i:i+len_peak]
+        _Y = Y[i:i+len_peak, :]
         if len(_Y) < len_peak or 0 in _Y:
             continue
 
         bkg, peak_norm = [], []
-        for j in range(_Y.shape[1]):  # For each segment
+        for j in range(Y.shape[1]):  # For each segment
             # Calculate peak norm
             beta = beta_H1[i:i+len_peak] if ifos[j] == 1 else beta_L1[i:i+len_peak]
 
             # Get spline from knots
             _bkg = np.zeros(len_peak)
             for k in range(len_peak):
-                x_knots, y_knots = reco_knots[j][i+k][0], reco_knots[j][i+k][1]
+                x_knots, y_knots = reco_knots[j][i+k, 0, :], reco_knots[j][i+k, 1, :]
                 _bkg[k] = models.model_xy_spline(
                     np.concatenate([x_knots, y_knots]), extrapolate=True)(
                         np.log(frequencies[i+k])
@@ -133,9 +133,23 @@ def make_args(Y, frequencies, peak_shape, reco_model_args, reco_knots,
             # Fill arrays
             bkg.append(_bkg)
             peak_norm.append(beta)
-        model_args = reco_model_args[j, i:i+len_peak, :]
+        model_args = reco_model_args[j][i:i+len_peak, :]
         peak_shape.update_freq(frequencies[i])
         yield _Y, bkg, model_args, peak_norm, peak_shape, frequencies[i]
+
+
+def get_num_segments(data):
+    """Get max N_segments from data keys (created by DM_finder_organiser)."""
+    N = -1
+    for key in data.keys():
+        try:
+            num = int(key.split("_")[-1])
+        except ValueError:
+            continue
+        if num > N:
+            N = num
+    assert N > -1
+    return N + 1
 
 
 def main(iteration=0, prefix="", n_processes=1, peak_shape_path=None):
@@ -150,24 +164,22 @@ def main(iteration=0, prefix="", n_processes=1, peak_shape_path=None):
     beta_H1, beta_L1 = data["beta_H1"], data["beta_L1"]
 
     # Decompress background / model args
-    # compressed_args, compressed_knots, idx_compressed =\
-    #     data["model_args"], data["knots"], data["idx_compression"]
+    N_segments = get_num_segments(data)
+    reco_model_args, reco_knots = [], []
+    for n_segment in range(N_segments):
+        compressed_args, compressed_knots, idx_compressed =\
+            list(map(lambda x: data[f"compressed_{x}_{n_segment}"],
+                     ["args", "knots", "idx_freq_to_df"]))
 
-    # reco_model_args, reco_knots = [], []
-    # for row_idx, row in enumerate(idx_compressed):
-    #     expanded_row, expanded_args, expanded_knots = [], [], []
+        _reco_model_args, _reco_knots = [], []
+        for [_, count], args, knots in zip(idx_compressed, compressed_args, compressed_knots):
+            _reco_model_args.extend([args]*count)
+            last_zero = knots.shape[1] - 1 - np.where(knots[0, :][::-1] == 0)[0][-1]
+            _reco_knots.extend([knots[:, :last_zero]]*count)
 
-    #     for [val, count], args, knots in zip(row, compressed_args[row_idx],
-    #                                          compressed_knots[row_idx]):
-    #         expanded_row.extend(np.full(count, val))
-    #         expanded_args.extend([args] * count)
-    #         last_zero = knots.shape[1] - 1 - np.where(knots[0, :][::-1] == 0)[0][-1]
-    #         expanded_knots.extend([knots[:, :last_zero]]*count)
 
-    #     reco_model_args.append(expanded_args)
-    #     reco_knots.append(expanded_knots)
-    # reco_model_args = np.array(reco_model_args)
-    reco_knots, reco_model_args = data["knots"], data["model_args"]
+        reco_model_args.append(np.array(_reco_model_args))
+        reco_knots.append(np.array(_reco_knots))
 
     # Derived variables
     len_peak = len(peak_shape)
