@@ -67,7 +67,6 @@ Universe = vanilla
 Executable = {path_to_wrapper}
 Arguments = $(Process) {n_processes} {prefix} {peak_shape_path}
 request_cpus = {request_cpus}
-transfer_input_files = {prefix}_$(Process).npz {peak_shape_path}
 accounting_group = aluk.dev.o4.cw.darkmatter.lpsd
 accounting_group_user = alexandresebastien.goettel
 request_disk = 1 GB
