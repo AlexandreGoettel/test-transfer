@@ -27,6 +27,8 @@ def parse_cmdl_args():
     # Add arguments
     parser.add_argument("--prefix", type=str, required=True,
                         help="Where to save the data (for condor).")
+    parser.add_argument("--rundir", type=str, required=True,
+                        help="Where to store the arg. files.")
     parser.add_argument("--data-path", type=str, required=True,
                         help="Path to the MC/data input file.")
     parser.add_argument("--data-prefix", type=str, default="result",
@@ -331,7 +333,7 @@ def make_args(fndr, fmin, fmax, isMC=False):
                 )
 
 
-def create_job_args(prefix, fmin=10, fmax=5000, isMC=False, **kwargs):
+def create_job_args(rundir="", prefix="", fmin=10, fmax=5000, isMC=False, **kwargs):
     """Coordinate q0 analysis."""
     # Get data (MC or Real)
     fndr = DMFinder(**kwargs)
@@ -347,7 +349,7 @@ def create_job_args(prefix, fmin=10, fmax=5000, isMC=False, **kwargs):
             for j, el in enumerate(args[f"compressed_{compression_key}"]):
                 args_np[f"compressed_{compression_key}_{j}"] = el
 
-        np.savez(f"{prefix}_{i}.npz", **args_np)
+        np.savez(os.path.join(rundir, f"{prefix}_{i}.npz"), **args_np)
 
 
 if __name__ == '__main__':

@@ -17,6 +17,8 @@ def parse_cmdl_args():
     # Add arguments
     parser.add_argument("--rundir", type=str, required=True,
                         help="Where to store all run files.")
+    parser.add_argument("--outdir", type=str, required=True,
+                        help="Where to store the run output.")
     parser.add_argument("--skip-args", action="store_true")
     parser.add_argument("--prefix", type=str, required=True,
                         help="Where to save the data (for condor).")
@@ -54,27 +56,27 @@ def write_submit_wrapper(script_path, start_iter=0):
 ITERATION=$(({start_iter} + $1))
 
 # Call the Python script
-/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --n-processes $2 --prefix $3 --peak-shape-path $4
+/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --n-processes $2 --rundir $3 --outdir $4 --prefix $5 --peak-shape-path $6
 """
     return _str
 
 
 def write_submit_file(N_jobs, request_cpus, path_to_wrapper,
-                      prefix, out_prefix, peak_shape_path, n_processes):
+                      rundir, outdir, prefix, peak_shape_path, n_processes):
     """Write the condor submit file for DM hunting jobs."""
-    _str = f"""
-Universe = vanilla
+    out_path = os.path.join(outdir, f"{prefix}_$(Process)")
+    _str = f"""Universe = vanilla
 Executable = {path_to_wrapper}
-Arguments = $(Process) {n_processes} {prefix} {peak_shape_path}
+Arguments = $(Process) {n_processes} {rundir} {outdir} {prefix} {peak_shape_path}
 request_cpus = {request_cpus}
 accounting_group = aluk.dev.o4.cw.darkmatter.lpsd
 accounting_group_user = alexandresebastien.goettel
 request_disk = 1 GB
 request_memory = 4 GB
 
-Output = {out_prefix}_$(Process).out
-Error = {out_prefix}_$(Process).err
-Log = {out_prefix}_$(Process).log
+Output = {out_path}.out
+Error = {out_path}.err
+Log = {out_path}.log
 
 Queue {N_jobs}
 """
@@ -87,7 +89,7 @@ def writefile(_str, filename):
         _f.write(_str)
 
 
-def main(prefix=None, rundir=None, fmin=10, fmax=5000, freqs_per_job=35000,
+def main(rundir=None, outdir=None, prefix=None, fmin=10, fmax=5000, freqs_per_job=35000,
          skip_args=True, n_processes=4, start_iter=0, **kwargs):
     """Organise argument creation and job submission."""
     # Analysis variables
@@ -106,7 +108,7 @@ def main(prefix=None, rundir=None, fmin=10, fmax=5000, freqs_per_job=35000,
 
     starting_indices = np.arange(N_min, N_max + freqs_per_job, freqs_per_job)
     if not skip_args:
-        print(f"Creating args for {len(starting_indices)} jobs..")
+        print(f"Creating args for {int(1+(N_max - N_min)/freqs_per_job)} jobs..")
         for idx_min in starting_indices:
             idx_max = min(idx_min + freqs_per_job, N_max)
             if idx_min >= idx_max:
@@ -117,7 +119,9 @@ def main(prefix=None, rundir=None, fmin=10, fmax=5000, freqs_per_job=35000,
                 fmax_job.append(fmax)
                 break
             fmax_job.append(f[idx_max])
-        create_job_args(prefix, fmin_job, fmax_job, **kwargs)
+        job_kwargs = {"prefix": prefix, "fmin": fmin_job, "fmax": fmax_job, "rundir": rundir}
+        job_kwargs.update(kwargs)
+        create_job_args(**job_kwargs)
 
     # Write submit files, coord with executable
     isolated_prefix = os.path.split(prefix)[-1]
@@ -129,7 +133,7 @@ def main(prefix=None, rundir=None, fmin=10, fmax=5000, freqs_per_job=35000,
     writefile(write_submit_wrapper(path_to_executable, start_iter),
               path_to_wrapper)
     writefile(write_submit_file(len(starting_indices), n_processes, path_to_wrapper,
-                                prefix, run_prefix, kwargs["peak_shape_path"], n_processes),
+                                rundir, outdir, prefix, kwargs["peak_shape_path"], n_processes),
               path_to_submitfile)
     print(f"Wrote submit files to {path_to_wrapper} and {path_to_submitfile}.")
 
