@@ -194,7 +194,7 @@ def get_results(name, JSON_FILE):
         return None
 
     # Convert the JSON object back to DataFrame
-    return pd.read_json(StringIO(json.dumps(json_df)))
+    return pd.read_json(json_df)
 
 
 def del_df_from_json(dname, JSON_FILE):
