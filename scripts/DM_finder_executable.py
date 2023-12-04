@@ -150,25 +150,24 @@ def main(iteration=0, prefix="", n_processes=1, peak_shape_path=None):
     beta_H1, beta_L1 = data["beta_H1"], data["beta_L1"]
 
     # Decompress background / model args
-    compressed_args, compressed_knots, idx_compressed =\
-        data["model_args"], data["knots"], data["idx_compression"]
+    # compressed_args, compressed_knots, idx_compressed =\
+    #     data["model_args"], data["knots"], data["idx_compression"]
 
-    idx_freq_to_df, reco_model_args, reco_knots = [], [], []
-    for row_idx, row in enumerate(idx_compressed):
-        expanded_row, expanded_args, expanded_knots = [], [], []
+    # reco_model_args, reco_knots = [], []
+    # for row_idx, row in enumerate(idx_compressed):
+    #     expanded_row, expanded_args, expanded_knots = [], [], []
 
-        for [val, count], args, knots in zip(row, compressed_args[row_idx],
-                                             compressed_knots[row_idx]):
-            expanded_row.extend(np.full(count, val))
-            expanded_args.extend([args] * count)
-            last_zero = knots.shape[1] - 1 - np.where(knots[0, :][::-1] == 0)[0][-1]
-            expanded_knots.extend([knots[:, :last_zero]]*count)
+    #     for [val, count], args, knots in zip(row, compressed_args[row_idx],
+    #                                          compressed_knots[row_idx]):
+    #         expanded_row.extend(np.full(count, val))
+    #         expanded_args.extend([args] * count)
+    #         last_zero = knots.shape[1] - 1 - np.where(knots[0, :][::-1] == 0)[0][-1]
+    #         expanded_knots.extend([knots[:, :last_zero]]*count)
 
-        idx_freq_to_df.append(expanded_row)
-        reco_model_args.append(expanded_args)
-        reco_knots.append(expanded_knots)
-    idx_freq_to_df = np.array(idx_freq_to_df)
-    reco_model_args = np.array(reco_model_args)
+    #     reco_model_args.append(expanded_args)
+    #     reco_knots.append(expanded_knots)
+    # reco_model_args = np.array(reco_model_args)
+    reco_knots, reco_model_args = data["knots"], data["model_args"]
 
     # Derived variables
     len_peak = len(peak_shape)
@@ -177,7 +176,7 @@ def main(iteration=0, prefix="", n_processes=1, peak_shape_path=None):
     # Now start parallel q0 calculation
     results = []
     _args = list(make_args(Y, frequencies, peak_shape, reco_model_args,
-                          reco_knots, ifos, beta_H1, beta_L1))
+                           reco_knots, ifos, beta_H1, beta_L1))
     print("Starting q0 calculation..")
     with Pool(n_processes) as pool,\
             tqdm(total=len(frequencies) - len_peak, position=0,
