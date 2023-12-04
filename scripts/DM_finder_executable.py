@@ -1,4 +1,5 @@
 """Run q0 calculation - condor version."""
+import os
 import argparse
 from multiprocessing import Pool
 from tqdm import tqdm, trange
@@ -16,6 +17,8 @@ def parse_cmdl_args():
     parser.add_argument("--peak-shape-path", type=str, required=True)
     parser.add_argument("--prefix", type=str, default="")
     parser.add_argument("--n-processes", type=int, default=1)
+    parser.add_argument("--rundir", type=str, required=True, help="Arg. file location")
+    parser.add_argument("--outdir", type=str, required=True, help="Where to store results.")
 
     return vars(parser.parse_args())
 
@@ -152,11 +155,11 @@ def get_num_segments(data):
     return N + 1
 
 
-def main(iteration=0, prefix="", n_processes=1, peak_shape_path=None):
+def main(rundir="", outdir="", iteration=0, prefix="", n_processes=1, peak_shape_path=None):
     """Find DM using args found in input files path at iteration."""
     # Get args from transferred files
     peak_shape = PeakShape(0, peak_shape_path)
-    data = np.load(f"{prefix}_{iteration}.npz")
+    data = np.load(os.path.join(rundir, f"{prefix}_{iteration}.npz"))
 
     # Read variables
     Y = data["Y"]
@@ -201,7 +204,7 @@ def main(iteration=0, prefix="", n_processes=1, peak_shape_path=None):
     q0_data = np.zeros((len(results), 4))
     for i, result in enumerate(results):
         q0_data[i, :] = result  # freqs, zero_lkl, max_lkl, mu
-    np.save(f"{prefix}_{iteration}_result.npy", q0_data)
+    np.save(os.path.join(outdir, f"{prefix}_{iteration}_result.npy"), q0_data)
 
 
 if __name__ == '__main__':
