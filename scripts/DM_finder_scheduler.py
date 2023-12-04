@@ -54,7 +54,7 @@ def write_submit_wrapper(script_path, start_iter=0):
 ITERATION=$(({start_iter} + $1))
 
 # Call the Python script
-python {script_path} --iteration $ITERATION --n-processes $2 --prefix $3 --peak-shape-path $4
+/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --n-processes $2 --prefix $3 --peak-shape-path $4
 """
     return _str
 
