@@ -297,38 +297,39 @@ def make_args(fndr, fmin, fmax, isMC=False):
                     np.log(np.exp(Y[fmin_idx:fmax_idx, i]) +
                             beta[fmin_idx:fmax_idx]*amp*fndr.peak_shape)
 
-    # Compress idx_freq_to_df
-    def append_data(_row, _args, _knots, _rowval, _argval, _knotval):
-        _row.append(_rowval)
-        _args.append(_argval)
-        _knots.append(_knotval)
+    # # Compress idx_freq_to_df
+    # def append_data(_row, _args, _knots, _rowval, _argval, _knotval):
+    #     _row.append(_rowval)
+    #     _args.append(_argval)
+    #     _knots.append(_knotval)
 
-    compressed_idx_freq_to_df, compressed_args, compressed_knots = [], [], []
-    for j in range(idx_freq_to_df.shape[0]):
-        compressed_row, _compressed_args, _compressed_knots = [], [], []
-        current_val, count = None, 0
+    # compressed_idx_freq_to_df, compressed_args, compressed_knots = [], [], []
+    # for j in range(idx_freq_to_df.shape[0]):  # N_segments
+    #     compressed_row, _compressed_args, _compressed_knots = [], [], []
+    #     current_val, count = None, 0
 
-        for i, val in enumerate(idx_freq_to_df[j, :]):
-            if val != current_val:
-                if i > 0:
-                    append_data(compressed_row, _compressed_args, _compressed_knots,
-                                [current_val, count], current_args, current_knots)
-                current_val, count = val, 1
-                current_knots, current_args = unique_knots[j, i, ...], unique_model_args[j, i, :]
-            else:
-                count += 1
-        # Update current values and append to global idx data
-        append_data(compressed_row, _compressed_args, _compressed_knots,
-                    [current_val, count], current_args, current_knots)
-        append_data(compressed_idx_freq_to_df, compressed_args, compressed_knots,
-                    compressed_row, _compressed_args, _compressed_knots)
-
+    #     for i, val in enumerate(idx_freq_to_df[j, :]):  # freqs
+    #         if val != current_val:  # New df
+    #             if i > 0:
+    #                 append_data(compressed_row, _compressed_args, _compressed_knots,
+    #                             [current_val, count], current_args, current_knots)
+    #             current_val, count = val, 1
+    #             current_knots, current_args = unique_knots[j, i, ...], unique_model_args[j, i, :]
+    #         else:
+    #             count += 1
+    #     # Update current values and append to global idx data
+    #     append_data(compressed_row, _compressed_args, _compressed_knots,
+    #                 [current_val, count], current_args, current_knots)
+    #     append_data(compressed_idx_freq_to_df, compressed_args, compressed_knots,
+    #                 compressed_row, _compressed_args, _compressed_knots)
     return dict(Y=Y, beta_H1=beta_H1, beta_L1=beta_L1, ifos=ifos,
                 fmin=freq_Hz[0], fmax=freq_Hz[-1],
-                model_args=np.array(compressed_args),
-                knots=np.array(compressed_knots),
-                idx_compression=np.array(compressed_idx_freq_to_df)
-                )
+                model_args=unique_model_args,
+                knots=unique_knots)
+                # model_args=np.array(compressed_args),
+                # knots=np.array(compressed_knots),
+                # idx_compression=np.array(compressed_idx_freq_to_df)
+                # )
 
 
 def create_job_args(prefix, fmin=10, fmax=5000, isMC=False, **kwargs):
