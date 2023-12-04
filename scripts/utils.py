@@ -1,8 +1,9 @@
+import os
 import csv
 from tqdm import tqdm
 import numpy as np
 from scipy.stats import norm
-from scipy.special import erf, owens_t
+from scipy.special import owens_t
 
 
 def seq_mean(x, y):
@@ -40,6 +41,31 @@ def apply_cfd(data, bins, _cfd):
         falling_idx = falling_idx_col[0] + peak_index
 
     return np.linspace(bins[rising_idx], bins[falling_idx+1], len(bins))
+
+
+def safe_loadtxt(filename, delimiter="\t", usecols=None, **kwargs):
+    """Read in a txt file with an arbitrary number of header lines starting with '#'."""
+    # Make sure there are no duplicates
+    if "skiprows" in kwargs:
+        kwargs.pop("skiprows")
+    if usecols is None:
+        usecols = [0, 1]
+
+    # Abs. vs rel. path
+    if not filename.startswith("/"):
+        filename = os.path.join(os.getcwd(), filename)
+
+    # Count the number of header lines
+    num_header_lines = 0
+    with open(filename, 'r') as f:
+        for line in f.readlines():
+            if not line.startswith('#'):
+                break
+            num_header_lines += 1
+
+    # Load the data using np.loadtxt(), skipping the header lines
+    return np.loadtxt(filename, delimiter=delimiter, usecols=usecols,
+                      skiprows=num_header_lines, **kwargs)
 
 
 def read(name, dtype=np.float64, n_lines=None,
