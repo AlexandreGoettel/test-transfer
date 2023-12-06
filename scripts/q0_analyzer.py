@@ -248,14 +248,8 @@ def hybrid_dataloader(q0_path, lbl, verbose=False, pruning=100,
     hybrid_fits(q0_data[:, 0], q0, dfdir, plotdir=plotdir, prefix=lbl)
 
 
-def main(q0_data_path, prefix, do_hybrid=False, dfdir="endgame",
-         threshold_sigma=5):
-    """Coordinate analysis."""
-    if do_hybrid:
-        hybrid_dataloader(q0_data_path, prefix,
-                          dfdir=dfdir, plotdir="endgame/plots")
-
-    # Thresholding tests!
+def get_q0_candidates(q0_data_path=None, prefix="", dfdir="endgame",
+                      threshold_sigma=5, verbose=False):
     # Fit info
     df_columns = ["fmin", "fmax", "x_knots", "y_knots",
                   "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
@@ -267,7 +261,8 @@ def main(q0_data_path, prefix, do_hybrid=False, dfdir="endgame",
     q0_data = np.load(q0_data_path)
     q0 = extract_clean_q0(q0_data)
 
-    for _, sub_df in df.iterrows():
+    indices, positions, heights, Zs = [], [], [], []
+    for _, sub_df in tqdm(df.iterrows(), desc=f"Candidate search '{prefix}'", total=len(df)):
         fmin, fmax, x_knots, y_knots, alpha, loc, sigma, chi_sqr\
             = sub_df[df_columns]
 
@@ -287,7 +282,7 @@ def main(q0_data_path, prefix, do_hybrid=False, dfdir="endgame",
         whitened_data = norm.ppf(
             utils.skew_normal_cdf(residuals, alpha=alpha, mu=loc, sigma=sigma)
         )
-        # Threshold - corrected for LEE
+        # Threshold - corrected for LEE  # FIXME Set threshold using injections?
         threshold = norm.ppf(1. - (1. - norm.cdf(threshold_sigma)) / len(y))
         # Clean
         whitened_data[np.isinf(whitened_data)] = np.sign(whitened_data[np.isinf(whitened_data)])\
@@ -295,7 +290,7 @@ def main(q0_data_path, prefix, do_hybrid=False, dfdir="endgame",
 
         # Plot
         corr_sigma = norm.ppf(1 - len(y) * (1 - norm.cdf(max(whitened_data))))
-        if corr_sigma > threshold_sigma:
+        if verbose and corr_sigma > threshold_sigma:
             fig = plt.figure(figsize=(10, 16))
             gs = GridSpec(6, 8, fig)
             ax_spline = fig.add_subplot(gs[:4, :4])
@@ -328,7 +323,73 @@ def main(q0_data_path, prefix, do_hybrid=False, dfdir="endgame",
             ax_whiten.set_ylim(.5 / len(whitened_data), ax_whiten.get_ylim()[1])
             plt.show()
 
+        mask = whitened_data >= threshold
+        if np.sum(mask):
+            indices.append(np.where(mask)[0])
+            positions.append(x[mask])
+            heights.append(y[mask])
+            Zs.append(whitened_data[mask])
+    return indices, positions, heights, Zs
+
+
+def clusterize_candidates(idx, freqs, heights, sigmas):
+    """Cluster groups of freq neighbours."""
+    _freqs, _heights, _sigmas = [], [], []
+    for i, _idx in enumerate(idx):
+        start_index = 0
+        # Iterate through each list in idx to find continuous blocks
+        for j in range(1, len(_idx) + 1):
+            if j == len(_idx) or _idx[j] != _idx[j-1] + 1:
+                # Process the block from start_index to j-1
+                _height_values = list(heights[i])
+                block_max_y = max(_height_values[start_index:j])
+                max_index = _height_values.index(block_max_y, start_index, j)
+                start_index = j
+
+                _heights.append(_height_values[max_index])
+                _freqs.append(freqs[i][max_index])
+                _sigmas.append(sigmas[i][max_index])
+    return _freqs, _heights, _sigmas
+
+
+def main(q0_data_path, prefix, do_hybrid=False, dfdir="endgame",
+         **q0_candidate_kwargs):
+    """Coordinate analysis."""
+    # Fit blocks
+    if do_hybrid:
+        hybrid_dataloader(q0_data_path, prefix,
+                          dfdir=dfdir, plotdir="endgame/plots")
+
+    # Look for peaks in q0 landscape
+    q0_candidate_kwargs.update({"dfdir": dfdir,
+                                "q0_data_path": q0_data_path,
+                                "prefix": prefix})
+    idx, freqs, heights, sigmas = get_q0_candidates(**q0_candidate_kwargs)
+    n_candidates = 0
+    for freq_group in freqs:
+        if len(freq_group):
+            n_candidates += len(freq_group)
+    print(f"Found {n_candidates} candidates!")
+
+    # Clusterize
+    freqs, heights, sigmas = clusterize_candidates(idx, freqs, heights, sigmas)
+    print(f"After clusterizing: {len(freqs)} candidates remain.")
+
+    # For each candidate, simulate raw q0 distribution assuming mu=0
+    # (to get significance) and compare with asymptotic scenario
+    for frequency, height in zip(freqs, heights):
+        # Get data around that peak
+        # Setup q0 calculation
+        # Decide on Nsim
+        # Simulate & hist
+        # Compare with asymptotics
+        pass
+
+
 
 if __name__ == '__main__':
-    main("singlebin_MC_noise_q0_data.npy", "noise")
-    # main("data_q0_data.npy", "data")
+    kwargs = {"dfdir": "endgame",
+              "threshold_sigma": 5,
+              "verbose": False}
+    # main("singlebin_MC_noise_q0_data.npy", "noise", **kwargs)
+    main("singlebin_data_q0_data.npy", "data", **kwargs)
