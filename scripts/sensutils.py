@@ -159,7 +159,9 @@ def get_std_skew(sigma, alpha):
 def logpdf_skewnorm(x, alpha, loc=0, scale=1):
     """Implement skewnorm.logpdf for speed."""
     norm_term = -0.5*((x - loc) / scale)**2
-    skew_term = np.log(0.5*(1. + erf(alpha*(x - loc) / (np.sqrt(2)*scale))))
+    lin_skew_term = 0.5*(1. + erf(alpha*(x - loc) / (np.sqrt(2)*scale)))
+    lin_skew_term[lin_skew_term == 0] = np.nan
+    skew_term = np.log(lin_skew_term)
     return _LOG_2_PI_TERM + norm_term + skew_term
 
 
@@ -343,7 +345,8 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
         order += k_pruning
     pbar.close()
 
-    # TODO: add protection in case no fit worked?
+    if best_f_popt is None:
+        return None, None, None
     best_fit = f_fit(x, *best_f_popt)
     if verbose:
         # Plot results
@@ -353,7 +356,6 @@ def bayesian_regularized_linreg(x, y, get_bic=None, f_fit=None,
         if plot_mean:
             plt.plot(x, kde_smoothing(y, kernel_size), label="kde", zorder=2)
         plt.legend(loc="best")
-        plt.show()
 
     return best_fit, best_f_popt, best_distr_popt
 
