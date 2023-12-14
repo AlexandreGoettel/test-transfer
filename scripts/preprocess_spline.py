@@ -193,7 +193,13 @@ def process_iteration(params):
     i, x, y, kwargs, verbose = params
     best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(x, y, **kwargs)
     if best_fit is None:
+        if verbose:
+            prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
+            plt.plot(x, y)
+            plt.savefig(os.path.join("log", f"fail_{prefix}.pdf"))
+            plt.close()
         return i, None, None, np.inf
+
     # Calculate chi-sqr of distr fit (Poisson uncertainty available)
     y_spline = models.model_xy_spline(f_popt, extrapolate=True)(x)
     h0, bins = np.histogram(y - y_spline, kwargs["nbins"] if "nbins" in kwargs else 100)
@@ -202,6 +208,7 @@ def process_iteration(params):
     distr = np.sum(h0)*(bins[1] - bins[0])*skewnorm.pdf(
         bin_centers, distr_popt[0], loc=distr_popt[1], scale=distr_popt[2])
     chi_sqr = np.sum((h0[m] - distr[m])**2 / h0[m]) / (len(h0[m]) - len(distr_popt))
+
     if verbose:
         prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
         fig = plt.figure(figsize=(16, 9))
