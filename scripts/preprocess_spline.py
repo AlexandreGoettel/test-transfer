@@ -27,6 +27,8 @@ def parse_inputs():
     parser.add_argument("--output-json-path", type=str, default="data/processing_results.json")
     parser.add_argument("--prefix", type=str, default="result",
                         help="Prefix of data files to use.")
+    parser.add_argument("--plot-prefix", type=str, default="",
+                        help="Prefix for plots in log/ if verbose.")
     parser.add_argument("--verbose", action="store_true")
 
     return vars(parser.parse_args())
@@ -103,7 +105,7 @@ def process_iteration(params):
         if verbose:
             prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
             plt.plot(x, y)
-            plt.savefig(os.path.join("log", f"fail_{prefix}.pdf"))
+            plt.savefig(os.path.join("log", f"{plot_prefix}fail_{prefix}.pdf"))
             plt.close()
         return i, None, None, np.inf
 
@@ -133,13 +135,13 @@ def process_iteration(params):
         k = len(f_popt) // 2
         x_knots, y_knots = f_popt[:k], f_popt[k:]
         ax.scatter(x_knots, y_knots, color="r")
-        plt.savefig(os.path.join("log", f"{prefix}_spline.pdf"))
-        plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
+        plt.savefig(os.path.join("log", f"{plot_prefix}{prefix}_spline.pdf"))
+        plt.savefig(os.path.join("log", f"{plot_prefix}{prefix}_spline.png"))
         plt.close()
     return i, f_popt, distr_popt, chi_sqr
 
 
-def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
+def process_hybrid(data_path, json_path, pruning=1, n_processes=1, plot_prefix="",
                    ana_fmin=10, ana_fmax=5000, segment_size=10000, verbose=False,
                    k_min=4, max_plateau=3, k_pruning=1, buffer=40, nbins=50):  # bic args
     """For now just a BIC testing area."""
@@ -174,7 +176,7 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
                 continue
             kwargs["disable_tqdm"] = i != len(df) + 1
             x, y = np.log(freq[start:end:pruning]), logPSD[start:end:pruning]
-            yield i, x, y, kwargs, verbose
+            yield i, x, y, kwargs, verbose, plot_prefix
 
     # Parallel calculation
     with Pool(processes=n_processes, maxtasksperchild=10) as pool:
@@ -299,7 +301,7 @@ def correct_blocks(data_path, json_path, whiten=True, verbose=False, **kwargs):
     sensutils.update_results(df_name, df_peak, json_path)
 
 
-def main(data_path, output_json_path, verbose=False):
+def main(data_path, output_json_path, plot_prefix="", verbose=False):
     """Organise analysis."""
     kwargs = {"epsilon": 0.1,
               "fmin": 10,
@@ -320,7 +322,7 @@ def main(data_path, output_json_path, verbose=False):
     process_hybrid(data_path, output_json_path, ana_fmin=10, ana_fmax=5000,
                    segment_size=1000, k_min=4, k_pruning=1, max_plateau=3,
                    buffer=40, nbins=75, pruning=3,
-                   verbose=verbose, n_processes=10)
+                   plot_prefix=plot_prefix, verbose=verbose, n_processes=10)
 
 
 if __name__ == '__main__':
