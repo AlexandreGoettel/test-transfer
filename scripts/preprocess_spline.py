@@ -28,6 +28,8 @@ def parse_inputs():
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--data-path-type", default="file", choices=["file", "dir"])
     parser.add_argument("--output-json-path", type=str, default="data/processing_results.json")
+    parser.add_argument("--prefix", type=str, default="result",
+                        help="Prefix of data files to use.")
     parser.add_argument("--verbose", action="store_true")
 
     return vars(parser.parse_args())
@@ -190,6 +192,8 @@ def process_iteration(params):
     """Wrap call to bayesian_regularized_linreg in parallel."""
     i, x, y, kwargs, verbose = params
     best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(x, y, **kwargs)
+    if best_fit is None:
+        return i, None, None, np.inf
     # Calculate chi-sqr of distr fit (Poisson uncertainty available)
     y_spline = models.model_xy_spline(f_popt, extrapolate=True)(x)
     h0, bins = np.histogram(y - y_spline, kwargs["nbins"] if "nbins" in kwargs else 100)
@@ -205,12 +209,16 @@ def process_iteration(params):
         ax, axRes = fig.add_subplot(gs[:3]), fig.add_subplot(gs[3])
         ax.plot(x, y)
         ax.plot(x, best_fit)
-        ax.set_title(f"{prefix}, " + r"$\chi^2$:" + f"{chi_sqr:.1f}")
+        ax.set_title(f"{prefix}, " + r"$\chi^2$:" + f"{chi_sqr:.1f}, k:{len(f_popt)//2}")
         ax.set_ylabel("log(PSD)")
         axRes.set_xlabel("log(Hz)")
         axRes.grid(linestyle="--", color="grey", alpha=.5)
         axRes.plot(x, y - best_fit, ".", zorder=1)
         axRes.axhline(0, color="r", zorder=2)
+        # Plot knots
+        k = len(f_popt) // 2
+        x_knots, y_knots = f_popt[:k], f_popt[k:]
+        ax.scatter(x_knots, y_knots, color="r")
         plt.savefig(os.path.join("log", f"{prefix}_spline.pdf"))
         plt.savefig(os.path.join("log", f"{prefix}_spline.png"))
         plt.close()
@@ -266,6 +274,8 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
     zipped_positions = list(zip(positions[:-1], positions[1:]))
     for result in tqdm(results, desc="Combine results"):
         i, f_popt, distr_popt, chi_sqr = result
+        if np.isinf(chi_sqr):
+            continue
         start, end = zipped_positions[i]
 
         assert not len(f_popt) % 2
@@ -289,7 +299,7 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1,
         plt.show()
 
 
-def correct_blocks(data_path, json_path, verbose=False, **kwargs):
+def correct_blocks(data_path, json_path, whiten=True, verbose=False, **kwargs):
     """
     Apply peak finding block correction and return path to data.
 
@@ -377,7 +387,7 @@ def correct_blocks(data_path, json_path, verbose=False, **kwargs):
 
 def main(data_path, output_json_path, verbose=False):
     """Organise analysis."""
-    kwargs = {"epsilon": 0.01,
+    kwargs = {"epsilon": 0.1,
               "fmin": 10,
               "fmax": 8192,
               "fs": 16384,
@@ -394,18 +404,19 @@ def main(data_path, output_json_path, verbose=False):
     # Fit a bayesian regularized spline model using a skew normal likelihood
     # Used on block-corrected noPeak data
     process_hybrid(data_path, output_json_path, ana_fmin=10, ana_fmax=5000,
-                   segment_size=10000, k_min=4, k_pruning=2, max_plateau=3,
+                   segment_size=1000, k_min=4, k_pruning=1, max_plateau=3,
                    buffer=40, nbins=75, pruning=3,
-                   verbose=verbose, n_processes=6)
+                   verbose=verbose, n_processes=10)
 
 
 if __name__ == '__main__':
     cmdl_kwargs = parse_inputs()
     path = cmdl_kwargs.pop("data_path")
     path_type = cmdl_kwargs.pop("data_path_type")
+    prefix = cmdl_kwargs.pop("prefix")
 
     if path_type == "file":
         main(path, **cmdl_kwargs)
     else:
-        for path in glob.glob(os.path.join(path, "result*")):
+        for path in glob.glob(os.path.join(path, f"{prefix}*")):
             main(path, **cmdl_kwargs)
