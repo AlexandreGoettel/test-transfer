@@ -53,6 +53,7 @@ class PeakShape(np.ndarray):
 def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
     """Likelihood of finding dark matter in the data."""
     # Actual likelihood calculation
+    assert Y.shape[0] == bkg.shape[0] and Y.shape[1] == peak_shape.shape[0]
     mu_DM = params
     try:
         residuals = Y - np.log(np.exp(bkg) + peak_norm*peak_shape*mu_DM)
@@ -60,6 +61,7 @@ def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
         raise err
     log_lkl = sensutils.logpdf_skewnorm(
         residuals, model_args[..., 0], model_args[..., 1], model_args[..., 2])
+    assert log_lkl.shape == Y.shape
 
     # Add infinity protection - breaks norm but ok if empirical tests
     mask = np.isinf(log_lkl)
@@ -115,8 +117,8 @@ def make_args(Y, frequencies, peak_shape, reco_model_args, reco_knots,
     """Generator for process_q0."""
     len_peak = len(peak_shape)
     for i in trange(len(frequencies) - len_peak, desc="Prep. args"):
-        _Y = Y[i:i+len_peak, :]
-        if len(_Y) < len_peak or 0 in _Y:
+        _Y = Y[i:i+len_peak, :].T
+        if _Y.shape[1] < len_peak or 0 in _Y:
             continue
 
         bkg, peak_norm = [], []
@@ -138,6 +140,8 @@ def make_args(Y, frequencies, peak_shape, reco_model_args, reco_knots,
             peak_norm.append(beta)
         model_args = reco_model_args[j][i:i+len_peak, :]
         peak_shape.update_freq(frequencies[i])
+
+        bkg, peak_norm, model_args = list(map(np.array, [bkg, peak_norm, model_args]))
         yield _Y, bkg, model_args, peak_norm, peak_shape, frequencies[i]
 
 
