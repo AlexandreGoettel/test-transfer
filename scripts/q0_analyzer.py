@@ -1,5 +1,6 @@
 """File to find significant candidates in DM q0 data by comparing MC and data distributions."""
 import os
+import sys
 import glob
 from multiprocessing import Pool
 import h5py
@@ -23,12 +24,13 @@ def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
     """Likelihood of finding dark matter in the data."""
     # Actual likelihood calculation
     mu_DM = params
+    assert Y.shape[0] == bkg.shape[0] and Y.shape[1] == peak_shape.shape[0]
     try:
         residuals = Y - np.log(np.exp(bkg) + peak_norm*peak_shape*mu_DM)
     except Exception as err:
         raise err
-    log_lkl = sensutils.logpdf_skewnorm(
-        residuals, model_args[..., 0], model_args[..., 1], model_args[..., 2])
+    log_lkl = sensutils.logpdf_skewnorm(residuals, *[model_args[:, i][:, None] for i in range(3)])
+    assert log_lkl.shape == Y.shape
 
     # Add infinity protection - breaks norm but ok if empirical tests
     mask = np.isinf(log_lkl)
@@ -143,7 +145,6 @@ class DataManager:
             frequency_idx = sensutils.binary_search(frequencies, test_freq)
 
             # Gather relevant data
-            # logPSD[i, :] = hdf_path["logPSD"][frequency_idx:frequency_idx+self.len_peak]
             freq_Hz[i, :] = frequencies[frequency_idx:frequency_idx+self.len_peak]
             model_args[i, :] = [alpha_skew, loc_skew, sigma_skew]
 
@@ -169,7 +170,7 @@ class DataManager:
 
         results = []
         with Pool(n_processes, maxtasksperchild=100) as pool:
-            with tqdm(total=Nsim, desc="Calculate q0") as pbar:
+            with tqdm(total=Nsim, desc="Calculate q0", position=1, leave=False) as pbar:
                 for result in pool.imap_unordered(get_q0_batch, make_args()):
                     results.append(result)
                     pbar.update(len(result[1]))
@@ -184,13 +185,16 @@ class DataManager:
 def get_q0_batch(args):
     """Calculate N q0 values - formatted for multiprocessing."""
     i, N, bkg, beta, model_args, peak_shape = args
+    # To mimic input format
+    q0_data = np.zeros((N, 4))
+
     # Generate background
     alpha, mu, sigma = [np.repeat(model_args[:, j][:, None], N, axis=1) for j in range(3)]
     MC_bkg = bkg + skewnorm.rvs(alpha, loc=mu, scale=sigma, size=(bkg.shape[0], N))
 
     # Maximise lkl
     def log_lkl(params, Y):
-        return log_likelihood(params[0], Y, bkg, beta, peak_shape, model_args)
+        return log_likelihood(params[0], Y[:, None], bkg, beta, peak_shape, model_args)
 
     # We can assume that most mu values in one batch will be similar
     # So get the initial guess only once, then use it for all
@@ -201,13 +205,18 @@ def get_q0_batch(args):
         mask = np.isnan(test_lkl) | np.isinf(test_lkl)
         idx += 1
         if idx == N:
-            print("mh")
-            return i, np.array([np.nan]*N)
+            return i, q0_data * np.nan
     initial_guess = test_mus[np.argmin(test_lkl[~mask])]
 
-    # To mimic input format
-    q0_data = np.zeros((N, 4))
-    for j in range(N):
+    # Minimize here
+    for j in range(max(0, idx-1), N):
+        # Can't start the minimize in a nan state
+        initial_lkl  = log_lkl([initial_guess], MC_bkg[:, j])
+        if np.isnan(initial_lkl) or np.isinf(initial_lkl):
+            test_lkl = np.array([-log_lkl([mu], MC_bkg[:, j]) for mu in test_mus])
+            mask = np.isnan(test_lkl) | np.isinf(test_lkl)
+            initial_guess = test_mus[~mask][np.argmin(test_lkl[~mask])]
+
         popt = minimize(lambda x: -log_lkl(x, MC_bkg[:, j]),
                         [initial_guess], bounds=[(0, None)],
                         method="Nelder-Mead", tol=1e-10)
@@ -215,8 +224,8 @@ def get_q0_batch(args):
         # Get max & zero lkl
         zero_lkl = log_lkl([0], MC_bkg[:, j])
         max_lkl = -popt.fun
-        if popt.x > 0:
-            q0_data[j, 1:] = [zero_lkl, max_lkl, popt.x]
+        if popt.x[0] > 0:
+            q0_data[j, 1:] = [zero_lkl, max_lkl, popt.x[0]]
 
     return i, q0_data
 
@@ -230,7 +239,7 @@ def extract_clean_q0(q0_data):
     # zero-lkl glitch correction
     q0[np.isinf(q0)] = max(q0[~np.isinf(q0)])
     q0[np.isinf(q0_data[:, 1])] = max(q0)
-    q0[q0_data[:, 1] == 0] = max(q0)
+    # q0[q0_data[:, 1] == 0] = max(q0)
     q0[q0 < 0] = 0
     return q0
 
@@ -418,11 +427,6 @@ def hybrid_fits(freq, q0, dfdir="", plotdir="", segment_size=10000,
 def hybrid_dataloader(q0_path, lbl, verbose=False, pruning=100,
                       dfdir="endgame", plotdir="endgame/plots"):
     """Prepare data for hybrid block fits."""
-    # Data loop
-    # for q0_path, lbl in zip(["singlebin_MC_noise_q0_data.npy",
-    #                          "singlebin_data_q0_data.npy",
-    #                          "singlebin_inj_17_q0_data.npy"],
-    #                         ["noise", "data", "injected_17"]):
     # Create q0 array
     q0_data = np.load(q0_path)
     q0 = extract_clean_q0(q0_data)
@@ -532,7 +536,7 @@ def get_q0_candidates(q0_data_path=None, prefix="", dfdir="endgame",
 
         mask = whitened_data >= threshold
         if np.sum(mask):
-            indices.append(np.where(mask)[0])
+            indices.append(fmin_idx + np.where(mask)[0])
             positions.append(x[mask])
             heights.append(y[mask])
             Zs.append(whitened_data[mask])
@@ -541,7 +545,7 @@ def get_q0_candidates(q0_data_path=None, prefix="", dfdir="endgame",
 
 def clusterize_candidates(idx, freqs, heights, sigmas):
     """Cluster groups of freq neighbours."""
-    _freqs, _heights, _sigmas = [], [], []
+    _indices, _freqs, _heights, _sigmas = [], [], [], []
     for i, _idx in enumerate(idx):
         start_index = 0
         # Iterate through each list in idx to find continuous blocks
@@ -553,14 +557,201 @@ def clusterize_candidates(idx, freqs, heights, sigmas):
                 max_index = _height_values.index(block_max_y, start_index, j)
                 start_index = j
 
+                _indices.append(idx[i][max_index])
                 _heights.append(_height_values[max_index])
                 _freqs.append(freqs[i][max_index])
                 _sigmas.append(sigmas[i][max_index])
-    return _freqs, _heights, _sigmas
+    return _indices, _freqs, _heights, _sigmas
+
+
+def get_data_around_candidate(mngr, test_freq, buffer=50):
+    # Get the relevant data
+    df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew"]
+    Y, freq_Hz, bkg, peak_norm = [np.zeros((len(mngr.data_info), int(mngr.len_peak+2*buffer)))
+                                  for _ in range(4)]
+    ifos = [""]*len(mngr.data_info)
+    model_args = np.zeros((len(mngr.data_info), int(mngr.len_peak+2*buffer), 3))
+    for i, (hdf_path, ifo, df) in enumerate(mngr.data_info):  # For each segment
+        # Find the df entry that contains the tested frequency
+        mask = (df['fmin'] <= test_freq) & (df['fmax'] >= test_freq)
+        # Skip this entry if test_freq is out of bounds
+        if np.sum(np.array(mask, dtype=int)) == 0:
+            continue
+        x_knots, y_knots, alpha_skew, loc_skew, sigma_skew = df[mask][df_columns].iloc[0]
+        ifos[i] = ifo
+
+        # Find closest matching frequency
+        frequencies = hdf_path["frequency"]
+        f_id = sensutils.binary_search(frequencies, test_freq)
+        imin, imax = f_id - buffer, f_id + buffer + mngr.len_peak
+
+        # Gather relevant data
+        Y[i, :] = hdf_path["logPSD"][imin:imax]
+        freq_Hz[i, :] = frequencies[imin:imax]
+        model_args[i, ...] = np.array([alpha_skew, loc_skew, sigma_skew])
+
+        # Construct background
+        bkg[i, :] = models.model_xy_spline(
+            np.concatenate([x_knots, y_knots]), extrapolate=True)(
+                np.log(frequencies[imin:imax])
+        )
+
+        # Set transfer function data
+        A_star_sqr = mngr.f_A_star[ifo](freq_Hz[i, :])**2
+        peak_norm[i, :] =\
+            mngr.rho_local / (np.pi*freq_Hz[i, :]**3 *
+                              A_star_sqr * (constants.e / constants.h)**2)
+    mngr.peak_shape.update_freq(test_freq)
+    return Y, freq_Hz, bkg, peak_norm, ifos, np.array(mngr.peak_shape[:]), model_args
+
+
+def plot_candidate(mu, Y, freq_Hz, bkg, peak_norm, ifos, peak_shape,
+                   *_, buffer=50):
+    """Do a candidate-style plot for H1 and L1."""
+    # Prepare the plots
+    fig = plt.figure()
+    gs = GridSpec(1, 2, figure=fig)
+    axH1 = fig.add_subplot(gs[0, 0])  # First row, first column
+    axL1 = fig.add_subplot(gs[0, 1], sharex=axH1, sharey=axH1)
+
+    # Plot the PSDs
+    for i in range(Y.shape[0]):
+        if ifos[i] == "":
+            continue
+        ax = axH1 if ifos[i] == "H1" else axL1
+        ax.plot(freq_Hz[i, :], np.exp(Y[i, :]), alpha=.5, zorder=1)
+        ax.plot(freq_Hz[i, :], np.exp(bkg[i, :]), alpha=.5, color="C0", zorder=0)
+
+    # Find the first H1 and L1 peak norm terms
+    peak_norm_H1 = peak_norm[ifos.index("H1"), :] if "H1" in ifos else 0
+    peak_norm_L1 = peak_norm[ifos.index("L1"), :] if "L1" in ifos else 0
+
+    len_peak, peak_shape[peak_shape == 0] = len(peak_shape), np.nan
+    # Min-max plots
+    for ifo, ax, _peak_norm in zip(["H1", "L1"], [axH1, axL1], [peak_norm_H1, peak_norm_L1]):
+        # Plot reconstructed peaks
+        ax.scatter(freq_Hz[0, buffer:buffer + len_peak],
+                   peak_shape*mu*_peak_norm[buffer:buffer + len_peak],
+                   color="k", zorder=2)
+        # Nice things
+        ax.set_title(ifo + r", $\Lambda_i^{-1}$:" +
+                        f" {np.sqrt(mu):.1e}")
+        ax.set_xlabel("Frequency a.u.")
+        ax.grid(linestyle="--", linewidth=1, color="grey", alpha=.33)
+    axL1.set_ylabel("log(PSD)")
+    axL1.set_yticklabels([])
+    axH1.set_yscale("log")
+    return axH1, axL1
+
+
+def tmp(mu, Y, freq_Hz, bkg, peak_norm, ifos, peak_shape):
+    """Temporary playground to plot candidate-related info."""
+    # 1. Plot N_segment_over_mu / N_segment per ifo.
+    # imin, imax = f_id - buffer, f_id + buffer + mngr.len_peak
+    isH1 = np.array([ifo == "H1" for ifo in ifos], dtype=bool)
+    buffer = (Y.shape[1] - len(peak_shape)) // 2
+
+    N_over_H1 = np.sum(np.exp(Y[isH1, buffer]) > mu*peak_shape*peak_norm[isH1, buffer])
+    N_over_L1 = np.sum(np.exp(Y[~isH1, buffer]) > mu*peak_shape*peak_norm[~isH1, buffer])
+    return N_over_H1, N_over_L1, np.sum(isH1)
+
+
+def validate_q0(mngr, freqs, ref_q0s, n_processes=1,
+                n_sim=10000, batch_size=300, threshold=5):
+    """Simulations to cross-check the validity of candidates."""
+    validated = np.zeros(len(freqs), dtype=int)
+    for i, (freq, ref_q0) in enumerate(tqdm(
+            zip(freqs, ref_q0s), total=len(freqs), desc="Validating q0")):
+        q0_data = mngr.simulate_q0_at_freq(
+            freq, n_sim, batch_size=batch_size, n_processes=n_processes)
+        q0 = extract_clean_q0(q0_data)
+        q0 = q0[q0 > 0]
+        if len(q0) == 0:
+            validated[i] = 2
+        elif ref_q0 > np.median(q0) + threshold*np.std(q0):
+            validated[i] = 1
+
+        # tqdm.write(f"{validated[i]}")
+        if validated[i] != 1:
+            print(q0)
+            print(q0_data[:, 1])
+            print(q0_data[:, 2])
+            print(q0_data[:, 3])
+            tqdm.write("--")
+    return validated
+
+
+def check_ifo_consistency(Y, _, bkg, peak_norm,
+                          ifos, peak_shape, model_args):
+    """Reconstruct mu in both ifos, with uncertainty, and return consistency-test data."""
+    isH1 = np.array([ifo == "H1" for ifo in ifos], dtype=bool)
+    isL1 = np.array([not x for x in isH1], dtype=bool)
+    idx = (Y.shape[1] - len(peak_shape)) // 2
+
+    q0s, mus, sigmas = [], [], []
+    for mask in isH1, isL1, np.ones(len(isH1), dtype=bool):
+        # Get args
+        _Y, _bkg, _beta = list(map(lambda x: x[mask, idx][:, None], [Y, bkg, peak_norm]))
+        _model_args = model_args[mask, idx, :]
+
+        # Def lkl to minimize
+        def log_lkl(params):
+            return log_likelihood(params, _Y, _bkg, _beta, peak_shape, _model_args)
+
+        # Get initial guess
+        test_mus = np.logspace(-40, -32, 1000)
+        test_lkl = np.array([-log_lkl(mu) for mu in test_mus])
+        mask = np.isnan(test_lkl) | np.isinf(test_lkl)
+        if np.sum(~mask) == 0:
+            mus.append(0)
+            q0s.append(0)
+            sigmas.append(0)
+            continue
+        initial_guess = test_mus[~mask][np.argmin(test_lkl[~mask])]
+
+        # Minimize
+        popt = minimize(lambda x: -log_lkl(x),
+                        initial_guess, bounds=[(0, None)],
+                        method="Nelder-Mead", tol=1e-10)
+        zero_lkl = log_lkl(0)
+        q0 = -2 * (zero_lkl + popt.fun)
+        mu_hat = popt.x[0]
+        if mu_hat == 0:
+            mus.append(0)
+            q0s.append(0)
+            sigmas.append(0)
+            continue
+
+        # Get uncertainty
+        dx = abs(mu_hat) / 2.
+        max_iterations = 17
+        for _ in range(max_iterations):
+            lkl_left, lkl_right = log_lkl(mu_hat - 2*dx), log_lkl(mu_hat + 2*dx)
+            if not np.isnan(lkl_left) and not np.isnan(lkl_right):
+                break
+            dx /= 2.
+
+        try:
+            sigma = sensutils.sigma_at_point(
+                log_lkl, mu_hat,
+                initial_dx=dx,
+                tolerance=1e-4)
+        except ValueError:
+            mus.append(np.nan)
+            q0s.append(np.nan)
+            sigmas.append(np.nan)
+            continue
+
+        mus.append(mu_hat)
+        q0s.append(q0)
+        sigmas.append(sigma)
+    # Test for consistency
+    return q0s, mus, sigmas
 
 
 def main(q0_data_path, prefix, DM_kwargs,
-         do_hybrid=False, dfdir="endgame", **q0_candidate_kwargs):
+         do_hybrid=False, do_crosscheck=False,
+         dfdir="endgame", **q0_candidate_kwargs):
     """Coordinate analysis."""
     # Fit blocks
     if do_hybrid:
@@ -571,37 +762,72 @@ def main(q0_data_path, prefix, DM_kwargs,
     q0_candidate_kwargs.update({"dfdir": dfdir,
                                 "q0_data_path": q0_data_path,
                                 "prefix": prefix})
-    # TODO: You'll have to think about idx positions if len_peak > 1
+    # TODO: You'll have to think more about idx positions if len_peak > 1
     idx, freqs, heights, sigmas = get_q0_candidates(**q0_candidate_kwargs)
-    n_candidates = 0
-    for freq_group in freqs:
-        if len(freq_group):
-            n_candidates += len(freq_group)
+    n_candidates = sum([len(group) for group in freqs])
     print(f"Found {n_candidates} candidates!")
 
     # Clusterize
-    freqs, heights, sigmas = clusterize_candidates(idx, freqs, heights, sigmas)
+    idx, freqs, heights, sigmas = clusterize_candidates(idx, freqs, heights, sigmas)
     print(f"After clusterizing: {len(freqs)} candidates remain.")
 
-    # For each candidate, simulate raw q0 distribution assuming mu=0
-    # (to get significance) and compare with asymptotic scenario
-
     mngr = DataManager(**DM_kwargs)
-    Nsim = 1 + int(1. / (1 - norm.cdf(5)))  # FIXME LEE-Correction
-    Nsim = Nsim // 10
-    batch_size = 300
-    for frequency, height in zip(freqs, heights):
-        # Plot candidate data
-        # TODO
-        # Get q0 distribution
-        q0_data = mngr.simulate_q0_at_freq(
-            frequency, Nsim, batch_size=batch_size, n_processes=10)
-        np.save("q0_data_test1.npy", q0_data)
-        # Plot q0 distribution and asymptotic formula
-        q0 = extract_clean_q0(q0_data)
-        ax = hist.plot_hist(np.sqrt(q0), 75, logy=True)
-        ax.axvline(np.sqrt(np.exp(height)), color="r", linestyle="--")
+    if do_crosscheck:
+        # For each candidate, simulate raw q0 distribution assuming mu=0
+        # (to get significance) and compare with asymptotic scenario
+        q0_val_info = validate_q0(mngr, freqs, np.exp(heights),
+                                  threshold=q0_candidate_kwargs["threshold_sigma"],
+                                  n_sim=100, batch_size=10, n_processes=10)
+        np.save("q0_val_info.npy", q0_val_info)
+    else:
+        q0_val_mask = np.load("q0_val_info.npy")
 
+    # Apply
+    # idx, freqs, heights, sigmas = list(map(lambda x: x[q0_val_mask],
+    #                                        [idx, freqs, heights, sigmas]))
+    # print(f"After q0 validation: {len(freqs)} candidates remain.")
+
+    # Consistency checks
+    is_consistent = np.zeros(len(freqs), dtype=bool)
+    individual_q0 = np.zeros((len(freqs), 3))
+    new_mus = np.zeros((len(freqs)))
+    t_threshold = 3  # sigma
+    for i, (frequency, log_q0val) in enumerate(tqdm(zip(freqs, heights), total=len(freqs))):
+        # Check the difference in reconstructed mu between H1 and L1
+        candidate_data = get_data_around_candidate(mngr, frequency)
+        _q0s, _mus, _sigmas = check_ifo_consistency(*candidate_data)
+        t_value = abs(_mus[0] - _mus[1]) / np.sqrt(_sigmas[0]**2 + _sigmas[1]**2)
+        is_consistent[i] = not np.isnan(t_value) and\
+            not np.isnan(_q0s[2]) and\
+            t_value <= t_threshold
+
+        individual_q0[i, :] = _q0s
+        new_mus[i] = _mus[2]
+        if is_consistent[i]:
+            tqdm.write(f"Old q0:\t{np.exp(log_q0val):.1f}\tNew:\t{_q0s[2]:.1f}")
+
+    print(f"After consistency_check: {np.sum(is_consistent)} candidates remain.")
+    print(f"TMP: {np.sum(individual_q0[:, 2] >= 9)} remain significant")
+
+    # Plot candidates
+    raw_q0_data = np.load(q0_data_path)
+    for new_q0s, mu, _is_consistent, _idx, frequency in tqdm(
+            zip(individual_q0, new_mus, is_consistent, idx, freqs), total=len(freqs)):
+        if not _is_consistent or new_q0s[2] < 9:
+            continue
+        # Plot candidate data
+        # mu = raw_q0_data[_idx, 3]
+        candidate_data = get_data_around_candidate(mngr, frequency)
+        axH1, axL1 = plot_candidate(mu, *candidate_data)
+        axH1.set_title(f"Total q0: {new_q0s[2]:.1f}, H1 only: {new_q0s[0]:.1f}")
+        axL1.set_title(f"L1 only q0: {new_q0s[1]:.1f}")
+        q0_data = mngr.simulate_q0_at_freq(
+            frequency, 10000, batch_size=300, n_processes=10)
+        q0 = extract_clean_q0(q0_data)
+        q0 = q0[q0 > 0]
+        ax = hist.plot_hist(q0, 75, logy=True)
+        ax.axvline(new_q0s[2], color="r", linestyle="--")
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -615,4 +841,5 @@ if __name__ == '__main__':
                  "tf_dir_path": "data/transfer_functions"
     }
     # main("singlebin_MC_noise_q0_data.npy", "noise", **kwargs)
-    main("singlebin_data_q0_data.npy", "data", DM_kwargs, **q0_kwargs)
+    main("singlebin_data_q0_data.npy", "data", DM_kwargs,
+         do_hybrid=False, do_crosscheck=False, **q0_kwargs)
