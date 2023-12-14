@@ -99,7 +99,7 @@ def get_bic(x, y, n_knots, buffer=20, nbins=100, verbose=False):
 
 def process_iteration(params):
     """Wrap call to bayesian_regularized_linreg in parallel."""
-    i, x, y, kwargs, verbose = params
+    i, x, y, kwargs, verbose, plot_prefix = params
     best_fit, f_popt, distr_popt = sensutils.bayesian_regularized_linreg(x, y, **kwargs)
     if best_fit is None:
         if verbose:
