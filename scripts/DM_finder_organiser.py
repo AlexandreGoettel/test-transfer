@@ -86,7 +86,7 @@ class DMFinder:
     def __init__(self, data_path=None, json_path=None, dname=None,
                  peak_shape_path=None, dname_freq=None,
                  injection_path=None, injection_peak_shape_path=None,
-                 max_chi=10, data_prefix="result", **kwargs):
+                 max_chi=10, data_prefix="result", tmp_prefix="", **kwargs):
         """Initialise necessarily shared variables and prep data."""
         # Init variables
         self.kwargs = kwargs
@@ -105,7 +105,7 @@ class DMFinder:
         self.transfer_functions, self.f_A_star = self.get_f_A_star()
         self.data_info = self.get_info_from_data_path(data_path, json_path,
                                                       prefix=data_prefix)
-        self.dfile = self.dfile_from_data(data_path, dname, dname_freq)
+        self.dfile = self.dfile_from_data(data_path, dname, dname_freq, tmp_prefix)
         self.dset = self.dfile[dname]
         self.freqs = self.dfile[dname_freq]
 
@@ -138,9 +138,9 @@ class DMFinder:
 
         return data_info
 
-    def dfile_from_data(self, data_path, dname, dname_freq):
+    def dfile_from_data(self, data_path, dname, dname_freq, prefix):
         """Create dfile by combining available data through data_info."""
-        dfile = h5py.File(os.path.join(data_path, "tmp_orga.h5"), "w")
+        dfile = h5py.File(os.path.join(data_path, f"{prefix}_tmp.h5"), "w")
         # Get PSD/freq shape
         # Using min because the difference in the frequencies between the different files
         # should only be a single bin anyway (last bin)
@@ -336,12 +336,17 @@ def make_args(fndr, fmin, fmax, isMC=False):
 def create_job_args(rundir="", prefix="", fmin=10, fmax=5000, isMC=False, **kwargs):
     """Coordinate q0 analysis."""
     # Get data (MC or Real)
+    kwargs["tmp_prefix"] = prefix
     fndr = DMFinder(**kwargs)
     if isinstance(fmin, int) or isinstance(fmax, int):
         fmin, fmax = [fmin], [fmax]
 
     for i, (_fmin, _fmax) in enumerate(tqdm(zip(fmin, fmax),
                                             desc="Filling args.", total=len(fmin))):
+        args_filename = os.path.join(rundir, f"{prefix}_{i}.npz")
+        if os.path.exists(args_filename):
+            continue
+
         args = make_args(fndr, _fmin, _fmax, isMC)
         args_np = {key: val for key, val in args.items()
                    if key in ["Y", "beta_H1", "beta_L1", "ifos", "fmin", "fmax"]}
@@ -349,7 +354,7 @@ def create_job_args(rundir="", prefix="", fmin=10, fmax=5000, isMC=False, **kwar
             for j, el in enumerate(args[f"compressed_{compression_key}"]):
                 args_np[f"compressed_{compression_key}_{j}"] = el
 
-        np.savez(os.path.join(rundir, f"{prefix}_{i}.npz"), **args_np)
+        np.savez(args_filename, **args_np)
 
 
 if __name__ == '__main__':
