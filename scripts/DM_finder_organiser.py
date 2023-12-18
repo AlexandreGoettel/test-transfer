@@ -311,8 +311,9 @@ def make_args(fndr, fmin, fmax, isMC=False):
         unique_model_args.append(_unique_model_args)
         Y.append(_Y)
     # Format to ndarray
-    ifos, idx_freq_to_df, unique_knots, unique_model_args, Y = list(map(
-        np.array, [ifos, idx_freq_to_df, unique_knots, unique_model_args, Y]))
+    ifos, unique_knots, unique_model_args, Y = list(map(
+        np.array, [ifos, unique_knots, unique_model_args, Y]))
+    idx_freq_to_df = np.array(idx_freq_to_df, dtype=np.int32)
     Y = Y.T
 
     # Compress idx_freq_to_df
