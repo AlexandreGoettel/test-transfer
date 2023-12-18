@@ -230,21 +230,22 @@ def make_args(fndr, fmin, fmax, isMC=False):
                                 * (constants.e / constants.h)**2)
 
     # Prepare background arguments
-    N_data = fndr.dset.shape[1]
+    # N_data = fndr.dset.shape[1]
     max_N_knots = max(max(len(knots) for knots in df["x_knots"])
                           for [_, _, df] in fndr.data_info)
     N_freqs = len(freq_Hz)
-    unique_knots = np.zeros((N_data, N_freqs, 2, max_N_knots))
-    unique_model_args = np.zeros((N_data, N_freqs, 3))
-    idx_freq_to_df = np.zeros((N_data, N_freqs), dtype=np.int32)
-    ifos = np.zeros(N_data, dtype=np.int16)
+    # unique_knots = np.zeros((N_data, N_freqs, 2, max_N_knots))
+    # unique_model_args = np.zeros((N_data, N_freqs, 3))
+    # idx_freq_to_df = np.zeros((N_data, N_freqs), dtype=np.int32)
+    # ifos = np.zeros(N_data, dtype=np.int16)
+    # Y = np.zeros((idx_max-idx_min, fndr.dset.shape[1])) if isMC else\
+    #     fndr.dset[idx_min:idx_max, :]
 
     # Fill arrays
-    Y = np.zeros((idx_max-idx_min, fndr.dset.shape[1])) if isMC else\
-        fndr.dset[idx_min:idx_max, :]
+    # To fill: Y, ifos, idx_freq_to_df, unique_knots, unique_model_args
+    Y, ifos, idx_freq_to_df, unique_knots, unique_model_args = [], [], [], [], []
     for i, (_, _, df) in enumerate(fndr.data_info):
         ifo = fndr.dset.attrs[str(i)]
-        ifos[i] = 0 if ifo == "L1" else 1
         # Find the df entries that contains the tested frequency
         mask = (df['fmin'] <= fmax) & (df['fmax'] >= fmin)
         _N_dfs = np.sum(np.array(mask, dtype=int))
@@ -253,19 +254,23 @@ def make_args(fndr, fmin, fmax, isMC=False):
             continue
 
         # For each idx in Y, get j_idx
+        _idx_freq_to_df = np.zeros(N_freqs)
+        _Y = np.zeros(N_freqs)
+        _unique_knots = np.zeros((N_freqs, 2, max_N_knots))
+        _unique_model_args = np.zeros((N_freqs, 3))
         for j, row in df.iterrows():
             condition = (row["fmin"] <= freq_Hz) & (row["fmax"] > freq_Hz)
-            idx_freq_to_df[i, condition] = j
+            _idx_freq_to_df[condition] = j
 
             # Get knots
             x_knots, y_knots = np.array(row["x_knots"]), np.array(row["y_knots"])
             k = len(x_knots)
-            unique_knots[i, condition, 0, :k] = x_knots.reshape((1, k))
-            unique_knots[i, condition, 1, :k] = y_knots.reshape((1, k))
+            _unique_knots[condition, 0, :k] = x_knots.reshape((1, k))
+            _unique_knots[condition, 1, :k] = y_knots.reshape((1, k))
 
             # Get model args
             alpha, loc, sigma = row["alpha_skew"], row["loc_skew"], row["sigma_skew"]
-            unique_model_args[i, condition, :] = np.array([alpha, loc, sigma]).reshape((1, 3))
+            _unique_model_args[condition, :] = np.array([alpha, loc, sigma]).reshape((1, 3))
 
             # Build logPSD data
             if isMC:
@@ -275,7 +280,7 @@ def make_args(fndr, fmin, fmax, isMC=False):
                         )
                 residuals = skewnorm.rvs(alpha, loc=loc, scale=sigma,
                                          size=np.sum(condition))
-                Y[condition, i] = spline + residuals
+                _Y[condition] = spline + residuals
 
         # Add injections
         if fndr.injection_path is not None:
@@ -295,9 +300,20 @@ def make_args(fndr, fmin, fmax, isMC=False):
 
                 # Update peak shape and inject
                 fndr.peak_shape.update_freq(freq)
-                Y[fmin_idx:fmax_idx, i] =\
-                    np.log(np.exp(Y[fmin_idx:fmax_idx, i]) +
+                _Y[fmin_idx:fmax_idx] =\
+                    np.log(np.exp(_Y[fmin_idx:fmax_idx]) +
                             beta[fmin_idx:fmax_idx]*amp*fndr.peak_shape)
+
+        # Fill lists
+        ifos.append(0 if ifo == "L1" else 1)
+        idx_freq_to_df.append(_idx_freq_to_df)
+        unique_knots.append(_unique_knots)
+        unique_model_args.append(_unique_model_args)
+        Y.append(_Y)
+    # Format to ndarray
+    ifos, idx_freq_to_df, unique_knots, unique_model_args, Y = list(map(
+        np.array, [ifos, idx_freq_to_df, unique_knots, unique_model_args, Y]))
+    Y = Y.T
 
     # Compress idx_freq_to_df
     def append_data(_row, _args, _knots, _rowval, _argval, _knotval):
