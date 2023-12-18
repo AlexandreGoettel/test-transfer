@@ -176,8 +176,7 @@ def process_hybrid(data_path, json_path, pruning=1, n_processes=1, plot_prefix="
                 continue
             kwargs["disable_tqdm"] = i != len(df) + 1
             x, y = np.log(freq[start:end:pruning]), logPSD[start:end:pruning]
-            if np.sum(np.isinf(x)) or np.sum(np.isnan(x)):
-                print(f"Skipping iteration {i} because of undefined x values.")
+            if len(x) <= 1:
                 continue
             yield i, x, y, kwargs, verbose, plot_prefix
 
