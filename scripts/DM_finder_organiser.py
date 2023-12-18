@@ -255,7 +255,7 @@ def make_args(fndr, fmin, fmax, isMC=False):
 
         # For each idx in Y, get j_idx
         _idx_freq_to_df = np.zeros(N_freqs)
-        _Y = np.zeros(N_freqs)
+        _Y = np.zeros(N_freqs) if isMC else fndr.dset[idx_min:idx_max, i]
         _unique_knots = np.zeros((N_freqs, 2, max_N_knots))
         _unique_model_args = np.zeros((N_freqs, 3))
         for j, row in df.iterrows():
