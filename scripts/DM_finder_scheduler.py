@@ -46,10 +46,10 @@ def write_submit_wrapper(script_path):
     _str = f"""#!/bin/bash
 
 # The iteration number is passed by HTCondor as the process number
-ITERATION=$(( $1 + $2 ))
+ITERATION=$(($1 + $2))
 
 # Call the Python script
-/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --ana-fmin $3 --ana-fmax $4 --Jdes $5 --data-path $6 --json-path $7 --peak-shape-path $8 --outdir $9 --isMC $10 --injection-path $11 --injection-peak-shape-path $12 --prefix $13 -n-processes $14 --n-frequencies $15
+/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --ana-fmin $3 --ana-fmax $4 --Jdes $5 --data-path $6 --json-path $7 --peak-shape-path $8 --outdir $9 --isMC ${10} --injection-path ${11} --injection-peak-shape-path ${12} --prefix ${13} -n-processes ${14} --n-frequencies ${15}
 """
     return _str
 
