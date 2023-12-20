@@ -1,24 +1,46 @@
 """Run q0 calculation - condor version."""
 import os
+import glob
 import argparse
 from multiprocessing import Pool
-from tqdm import tqdm, trange
+from tqdm import tqdm
+import h5py
 from scipy.optimize import minimize
+from scipy.interpolate import interp1d
+from scipy import constants
+from scipy.stats import skewnorm
+import pandas as pd
 import numpy as np
 # Project imports
 import sensutils
 import models
+import utils
+
+
+BASE_PATH = os.path.split(os.path.abspath(__file__))[0]
 
 
 def parse_cmdl_args():
     """Parse cmdl args."""
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--n-frequencies", type=int, required=True)
     parser.add_argument("--iteration", type=int, required=True)
+    parser.add_argument("--ana-fmin", type=float, required=True)
+    parser.add_argument("--ana-fmax", type=float, required=True)
+    parser.add_argument("--Jdes", type=int, required=True)
+    parser.add_argument("--data-path", type=str, required=True)
+    parser.add_argument("--json-path", type=str, required=True)
     parser.add_argument("--peak-shape-path", type=str, required=True)
+    parser.add_argument("--outdir", type=str, required=True, help="Where to store results.")
+    parser.add_argument("--data-prefix", type=str, default="result")
+
+    parser.add_argument("--isMC", action="store_true")
+    parser.add_argument("--injection-path", type=str, default=None)
+    parser.add_argument("--injection-peak-shape-path", type=str, default=None)
+
+    parser.add_argument("--max-chi", type=float, default=10)
     parser.add_argument("--prefix", type=str, default="")
     parser.add_argument("--n-processes", type=int, default=1)
-    parser.add_argument("--rundir", type=str, required=True, help="Arg. file location")
-    parser.add_argument("--outdir", type=str, required=True, help="Where to store results.")
 
     return vars(parser.parse_args())
 
@@ -48,6 +70,74 @@ class PeakShape(np.ndarray):
         """Update the frequency value (and as such the peak shape array if necessary)."""
         self.f = np.array([f])
         self._update_array()
+
+
+class DMFinder:
+    """Hold DM-finding related options."""
+
+    def __init__(self, data_path=None, json_path=None, peak_shape_path=None,
+                 injection_path=None, injection_peak_shape_path=None,
+                 max_chi=10, data_prefix="result", **_):
+        """Initialise necessarily shared variables and prep data."""
+        # Init variables
+        self.max_chi = max_chi
+        self.injection_path = injection_path
+        self.rho_local = 0.4 / (constants.hbar / constants.e
+                                * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
+
+        # Generate peak shape
+        self.peak_shape = None if peak_shape_path is None else PeakShape(0, peak_shape_path)
+        self.injection_peak_shape = self.peak_shape if injection_peak_shape_path is None else\
+            PeakShape(0, injection_peak_shape_path)
+        self.len_peak = 0 if self.peak_shape is None else len(self.peak_shape)
+
+        # Read data & TF info
+        self.transfer_functions, self.f_A_star = self.get_f_A_star()
+        self.data_info = self.get_info_from_data_path(data_path, json_path,
+                                                      prefix=data_prefix)
+
+    def __del__(self):
+        """Close HDF properly."""
+        if hasattr(self, "data_info"):
+            for dfile, _, _ in self.data_info:
+                dfile.close()
+        if hasattr(self, "dfile") and self.dfile:
+            self.dfile.close()
+
+    def parse_ifo(self, i):
+        """Parse the ifo from the dset attr at index i."""
+        return self.dset.attrs[str(i)].split("_")[-1]
+
+    def get_info_from_data_path(self, data_path, json_path, prefix="result"):
+        """Get all possible info from result files in data_path and json_path."""
+        data_paths = sorted(list(glob.glob(os.path.join(data_path, f"{prefix}*"))))
+        data_info = []
+        for _data_path in tqdm(data_paths, desc="Opening data HDFs", leave=False):
+            _data_info = []
+            _data_info.append(h5py.File(sensutils.get_corrected_path(_data_path), "r"))
+            ifo = sensutils.parse_ifo(_data_path)
+            _data_info.append(ifo)
+            df_key = "splines_" + sensutils.get_df_key(_data_path)
+            _data_info.append(sensutils.get_results(df_key, json_path))
+            assert _data_info[-1] is not None
+            # _data_info.append(df_key)
+            data_info.append(_data_info)
+
+        return data_info
+
+    def get_f_A_star(self):
+        """Get dicts of transfer function info."""
+        tf_dir = os.path.join(BASE_PATH, "data", "transfer_functions")
+        transfer_functions = {}
+        transfer_functions["H1"] = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LHO.txt"),
+                                            delimiter="\t")
+        transfer_functions["L1"] = pd.read_csv(os.path.join(tf_dir, "Amp_Cal_LLO.txt"),
+                                            delimiter="\t")
+        f_A_star = {"H1": interp1d(transfer_functions["H1"]["Freq_o"],
+                                transfer_functions["H1"]["Amp_Cal_LHO"]),
+                    "L1": interp1d(transfer_functions["L1"]["Freq_Cal"],
+                                transfer_functions["L1"]["amp_cal_LLO"])}
+        return transfer_functions, f_A_star
 
 
 def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
@@ -112,95 +202,74 @@ def process_q0(args):
     return fmin, zero_lkl, max_lkl, mu
 
 
-def make_args(Y, frequencies, peak_shape, reco_model_args, reco_knots,
-              ifos, beta_H1, beta_L1):
-    """Generator for process_q0."""
-    len_peak = len(peak_shape)
-    for i in trange(len(frequencies) - len_peak, desc="Prep. args"):
-        _Y = Y[i:i+len_peak, :].T
-        if _Y.shape[1] < len_peak or 0 in _Y:
-            continue
+def make_args(fndr, ana_fmin, ana_fmax, Jdes, n_freqs, iteration=0, isMC=False):
+    """Generator to prep. parallel q0 calculation."""
+    # Get process variables
+    freqs = np.logspace(np.log10(ana_fmin), np.log10(ana_fmax),
+                        Jdes)[iteration*n_freqs:(iteration+1)*n_freqs]
 
-        bkg, peak_norm = [], []
-        for j in range(Y.shape[1]):  # For each segment
-            # Calculate peak norm
-            beta = beta_H1[i:i+len_peak] if ifos[j] == 1 else beta_L1[i:i+len_peak]
+    # Fill args
+    df_columns = ["x_knots", "y_knots", "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"]
+    for test_freq in freqs:
+        Y, bkg, model_args, peak_norm = [], [], [], []
+        for hdf_path, ifo, df in fndr.data_info:
+            mask = (df['fmin'] <= test_freq) & (df['fmax'] >= test_freq)
+            # Skip this entry if test_freq is out of bounds
+            if np.sum(np.array(mask, dtype=int)) == 0:
+                continue
+            x_knots, y_knots, alpha_skew, loc_skew, sigma_skew, chi_sqr\
+                = df[mask][df_columns].iloc[0]
+            # Skip this entry if fit is bad
+            if chi_sqr >= fndr.max_chi_sqr:
+                continue
 
-            # Get spline from knots
-            _bkg = np.zeros(len_peak)
-            for k in range(len_peak):
-                x_knots, y_knots = reco_knots[j][i+k][0], reco_knots[j][i+k][1]
-                _bkg[k] = models.model_xy_spline(
-                    np.concatenate([x_knots, y_knots]), extrapolate=True)(
-                        np.log(frequencies[i+k])
-                    )
+            # Get data location
+            _frequencies = hdf_path["frequency"]
+            idx = sensutils.binary_search(_frequencies, test_freq)
+            freq_Hz = _frequencies[idx:idx + fndr.len_peak]
 
-            # Fill arrays
+            # Skip this entry if freq. bound is reached
+            if idx+fndr.len_peak >= len(_frequencies):
+                continue
+
+            # Get data values
+            _beta = fndr.rho_local / (np.pi*freq_Hz**3 * fndr.f_A_star[ifo](freq_Hz)**2
+                                      * (constants.e / constants.h)**2)
+            _bkg = models.model_xy_spline(np.concatenate([x_knots, y_knots]),
+                                          extrapolate=True)(np.log(freq_Hz))
+            _model_args = [alpha_skew, loc_skew, sigma_skew]
+
+            if isMC:
+                residuals = skewnorm.rvs(alpha_skew, loc=loc_skew,
+                                         scale=sigma_skew, size=fndr.len_peak)
+                _Y = _bkg + residuals
+            else:
+                _Y = hdf_path["logPSD"][idx:idx + fndr.len_peak]
+
+            # Fill args
+            Y.append(_Y)
             bkg.append(_bkg)
-            peak_norm.append(beta)
-        model_args = reco_model_args[j][i:i+len_peak, :]
-        peak_shape.update_freq(frequencies[i])
+            model_args.append(_model_args)
+            peak_norm.append(_beta)
 
-        bkg, peak_norm, model_args = list(map(np.array, [bkg, peak_norm, model_args]))
-        yield _Y, bkg, model_args, peak_norm, peak_shape, frequencies[i]
-
-
-def get_num_segments(data):
-    """Get max N_segments from data keys (created by DM_finder_organiser)."""
-    N = -1
-    for key in data.keys():
-        try:
-            num = int(key.split("_")[-1])
-        except ValueError:
+        if not Y:
             continue
-        if num > N:
-            N = num
-    assert N > -1
-    return N + 1
+        fndr.peak_shape.update_freq(test_freq)
+        Y, bkg, peak_norm, model_args = list(map(np.array, [Y, bkg, peak_norm, model_args]))
+        yield Y, bkg, model_args, peak_norm, fndr.peak_shape[:], test_freq
 
 
-def main(rundir="", outdir="", iteration=0, prefix="", n_processes=1, peak_shape_path=None):
-    """Find DM using args found in input files path at iteration."""
-    # Get args from transferred files
-    peak_shape = PeakShape(0, peak_shape_path)
-    data = np.load(os.path.join(rundir, f"{prefix}_{iteration}.npz"))
+def main(n_frequencies=35000, iteration=0, Jdes=None, ana_fmin=10, ana_fmax=5000, isMC=False,
+         outdir=None, prefix="", n_processes=1, **kwargs):
+    """Run q0 calculation for selected frequencies."""
+    fndr = DMFinder(**kwargs)
+    args = make_args(fndr, ana_fmin, ana_fmax, Jdes, n_frequencies, iteration=iteration, isMC=isMC)
 
-    # Read variables
-    Y = data["Y"]
-    ifos = data["ifos"]  # 0: L1, 1: H1
-    beta_H1, beta_L1 = data["beta_H1"], data["beta_L1"]
-
-    # Decompress background / model args
-    N_segments = get_num_segments(data)
-    reco_model_args, reco_knots = [], []
-    for n_segment in range(N_segments):
-        compressed_args, compressed_knots, idx_compressed =\
-            list(map(lambda x: data[f"compressed_{x}_{n_segment}"],
-                     ["args", "knots", "idx_freq_to_df"]))
-
-        _reco_model_args, _reco_knots = [], []
-        for [_, count], args, knots in zip(idx_compressed, compressed_args, compressed_knots):
-            _reco_model_args.extend([args]*count)
-            last_zero = knots.shape[1] - 1 - np.where(knots[0, :][::-1] == 0)[0][-1]
-            _reco_knots.extend([knots[:, :last_zero]]*count)
-
-
-        reco_model_args.append(np.array(_reco_model_args))
-        reco_knots.append(_reco_knots)
-
-    # Derived variables
-    len_peak = len(peak_shape)
-    frequencies = np.logspace(np.log10(data["fmin"]), np.log10(data["fmax"]), Y.shape[0])
-
-    # Now start parallel q0 calculation
     results = []
-    _args = list(make_args(Y, frequencies, peak_shape, reco_model_args,
-                           reco_knots, ifos, beta_H1, beta_L1))
-    print("Starting q0 calculation..")
-    with Pool(n_processes) as pool,\
-            tqdm(total=len(frequencies) - len_peak, position=0,
+    with Pool(n_processes, maxtasksperchild=100) as pool,\
+            tqdm(total=n_frequencies, position=0,
                  desc="q0 calc.", leave=True) as pbar:
-        for result in pool.imap(process_q0, (arg for arg in _args), chunksize=10):
+        for result in pool.imap(process_q0, args):
             results.append(result)
             pbar.update(1)
 
@@ -213,4 +282,3 @@ def main(rundir="", outdir="", iteration=0, prefix="", n_processes=1, peak_shape
 
 if __name__ == '__main__':
     main(**parse_cmdl_args())
-

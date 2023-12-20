@@ -19,7 +19,6 @@ def parse_cmdl_args():
                         help="Where to store all run files.")
     parser.add_argument("--outdir", type=str, required=True,
                         help="Where to store the run output.")
-    parser.add_argument("--skip-args", action="store_true")
     parser.add_argument("--prefix", type=str, required=True,
                         help="Where to save the data (for condor).")
     parser.add_argument("--data-path", type=str, required=True,
@@ -30,11 +29,7 @@ def parse_cmdl_args():
                         help="Path to the post-processing json file.")
     parser.add_argument("--peak-shape-path", type=str, required=True,
                         help="Path to the peak_shape_data.npz file.")
-    parser.add_argument("--dname", type=str, required=True, help="Name of the PSD dataset.")
-    parser.add_argument("--dname-freq", type=str, required=True,
-                        help="Name of the frequency dataset.")
-    parser.add_argument("--max-chi", type=int, default=10,
-                        help="Maximum chi^2 deviation to skew norm fit in a chunk.")
+
     parser.add_argument("--fmin", type=float, default=10)
     parser.add_argument("--fmax", type=float, default=5000)
     parser.add_argument("--freqs-per-job", type=int, default=35000)
@@ -44,30 +39,32 @@ def parse_cmdl_args():
     parser.add_argument("--injection-peak-shape-path", type=str, default=None,
                         help="If given, use this for injections instead of peak-shape-path.")
     parser.add_argument("--n-processes", type=int, default=4)
-    parser.add_argument("--start-iter", type=int, default=0)
     return vars(parser.parse_args())
 
 
-def write_submit_wrapper(script_path, start_iter=0):
+def write_submit_wrapper(script_path):
     """Write the condor submit executable - wrapping around the python script."""
     _str = f"""#!/bin/bash
 
 # The iteration number is passed by HTCondor as the process number
-ITERATION=$(({start_iter} + $1))
+ITERATION=$(( $1 + $2 ))
 
 # Call the Python script
-/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --n-processes $2 --rundir $3 --outdir $4 --prefix $5 --peak-shape-path $6
+/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --ana-fmin $3 --ana-fmax $4 --Jdes $5 --data-path $6 --json-path $7 --peak-shape-path $8 --outdir $9 --isMC $10 --injection-path $11 --injection-peak-shape-path $12 --prefix $13 -n-processes $14
 """
     return _str
 
 
-def write_submit_file(N_jobs, request_cpus, path_to_wrapper,
-                      rundir, outdir, prefix, peak_shape_path, n_processes):
+def write_submit_file(N_start, N_end, request_cpus, path_to_wrapper, outdir, prefix,
+                      peak_shape_path, n_freqs, ana_fmin, ana_fmax, Jdes, isMC,
+                      data_path, json_path, injection_path, injection_peak_shape_path):
     """Write the condor submit file for DM hunting jobs."""
     out_path = os.path.join(outdir, f"{prefix}_$(Process)")
+    args = f"{n_freqs} {ana_fmin} {ana_fmax} {Jdes} {data_path} {json_path} {peak_shape_path}" +\
+        f" {outdir} {isMC} {injection_path} {injection_peak_shape_path} {prefix} {request_cpus}"
     _str = f"""Universe = vanilla
 Executable = {path_to_wrapper}
-Arguments = $(Process) {n_processes} {rundir} {outdir} {prefix} {peak_shape_path}
+Arguments = $(Process) {N_start} {args}
 request_cpus = {request_cpus}
 accounting_group = aluk.dev.o4.cw.darkmatter.lpsd
 accounting_group_user = alexandresebastien.goettel
@@ -78,7 +75,7 @@ Output = {out_path}.out
 Error = {out_path}.err
 Log = {out_path}.log
 
-Queue {N_jobs}
+Queue {N_end + 1 - N_start}
 """
     return _str
 
@@ -90,7 +87,8 @@ def writefile(_str, filename):
 
 
 def main(rundir=None, outdir=None, prefix=None, fmin=10, fmax=5000, freqs_per_job=35000,
-         skip_args=True, n_processes=4, start_iter=0, **kwargs):
+         data_path=None, json_path=None, peak_shape_path=None, injection_path=None,
+         injection_peak_shape_path=None, n_processes=4, isMC=False, **_):
     """Organise argument creation and job submission."""
     # Analysis variables
     resolution = 1e-6
@@ -100,28 +98,16 @@ def main(rundir=None, outdir=None, prefix=None, fmin=10, fmax=5000, freqs_per_jo
     # Process variables
     Jdes = utils.Jdes(fmin_lpsd, fmax_lpsd, resolution)
 
-    # Create job arguments for each freq. block
-    fmin_job, fmax_job = [], []
-    f = np.logspace(np.log10(fmin_lpsd), np.log10(fmax_lpsd), Jdes)
-    N_min = int((np.log(fmin) - np.log(fmin_lpsd)) / np.log(1. + resolution))
-    N_max = min(Jdes, int(1 + (np.log(fmax) - np.log(fmin_lpsd)) / np.log(1. + resolution)))
-
-    starting_indices = np.arange(N_min, N_max + freqs_per_job, freqs_per_job)
-    if not skip_args:
-        print(f"Creating args for {int(1+(N_max - N_min)/freqs_per_job)} jobs..")
-        for idx_min in starting_indices:
-            idx_max = min(idx_min + freqs_per_job, N_max)
-            if idx_min >= idx_max:
-                continue
-
-            fmin_job.append(f[idx_min])
-            if idx_max >= Jdes:
-                fmax_job.append(fmax)
-                break
-            fmax_job.append(f[idx_max])
-        job_kwargs = {"prefix": prefix, "fmin": fmin_job, "fmax": fmax_job, "rundir": rundir}
-        job_kwargs.update(kwargs)
-        create_job_args(**job_kwargs)
+    freqs = np.logspace(np.log10(fmin_lpsd), np.log10(fmax_lpsd), Jdes)
+    iter_start, iter_end = None, None
+    for i in range(Jdes//freqs_per_job + 1):
+        if iter_start is None and freqs[(i+1)*freqs_per_job] >= fmin:
+            iter_start = i
+        if iter_end is None and freqs[(i+1)*freqs_per_job] >= fmax:
+            iter_end = i
+            break
+    else:
+        raise ValueError
 
     # Write submit files, coord with executable
     isolated_prefix = os.path.split(prefix)[-1]
@@ -130,10 +116,11 @@ def main(rundir=None, outdir=None, prefix=None, fmin=10, fmax=5000, freqs_per_jo
     path_to_executable = os.path.join(BASE_PATH, "DM_finder_executable.py")
     path_to_submitfile = f"{run_prefix}.submit"
 
-    writefile(write_submit_wrapper(path_to_executable, start_iter),
-              path_to_wrapper)
-    writefile(write_submit_file(len(starting_indices), n_processes, path_to_wrapper,
-                                rundir, outdir, prefix, kwargs["peak_shape_path"], n_processes),
+    writefile(write_submit_wrapper(path_to_executable), path_to_wrapper)
+    writefile(write_submit_file(
+        iter_start, iter_end, n_processes, path_to_wrapper, outdir, prefix,
+        peak_shape_path, freqs_per_job, fmin_lpsd, fmax_lpsd, Jdes, isMC,
+        data_path, json_path, injection_path, injection_peak_shape_path),
               path_to_submitfile)
     print(f"Wrote submit files to {path_to_wrapper} and {path_to_submitfile}.")
 
