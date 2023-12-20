@@ -14,7 +14,6 @@ import numpy as np
 # Project imports
 import sensutils
 import models
-import utils
 
 
 BASE_PATH = os.path.split(os.path.abspath(__file__))[0]

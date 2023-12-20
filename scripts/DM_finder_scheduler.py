@@ -4,7 +4,6 @@ import argparse
 import numpy as np
 # Project imports
 import utils
-from DM_finder_organiser import create_job_args
 
 
 BASE_PATH = os.path.split(os.path.abspath(__file__))[0]
