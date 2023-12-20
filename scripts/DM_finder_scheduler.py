@@ -49,7 +49,7 @@ def write_submit_wrapper(script_path):
 ITERATION=$(( $1 + $2 ))
 
 # Call the Python script
-/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --ana-fmin $3 --ana-fmax $4 --Jdes $5 --data-path $6 --json-path $7 --peak-shape-path $8 --outdir $9 --isMC $10 --injection-path $11 --injection-peak-shape-path $12 --prefix $13 -n-processes $14
+/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --ana-fmin $3 --ana-fmax $4 --Jdes $5 --data-path $6 --json-path $7 --peak-shape-path $8 --outdir $9 --isMC $10 --injection-path $11 --injection-peak-shape-path $12 --prefix $13 -n-processes $14 --n-frequencies $15
 """
     return _str
 
@@ -59,8 +59,8 @@ def write_submit_file(N_start, N_end, request_cpus, path_to_wrapper, outdir, pre
                       data_path, json_path, injection_path, injection_peak_shape_path):
     """Write the condor submit file for DM hunting jobs."""
     out_path = os.path.join(outdir, f"{prefix}_$(Process)")
-    args = f"{n_freqs} {ana_fmin} {ana_fmax} {Jdes} {data_path} {json_path} {peak_shape_path}" +\
-        f" {outdir} {isMC} {injection_path} {injection_peak_shape_path} {prefix} {request_cpus}"
+    args = f"{ana_fmin} {ana_fmax} {Jdes} {data_path} {json_path} {peak_shape_path} {outdir}" +\
+        f"{isMC} {injection_path} {injection_peak_shape_path} {prefix} {request_cpus} {n_freqs}"
     _str = f"""Universe = vanilla
 Executable = {path_to_wrapper}
 Arguments = $(Process) {N_start} {args}
@@ -121,7 +121,7 @@ def main(rundir=None, outdir=None, prefix=None, fmin=10, fmax=5000, freqs_per_jo
         peak_shape_path, freqs_per_job, fmin_lpsd, fmax_lpsd, Jdes, isMC,
         data_path, json_path, injection_path, injection_peak_shape_path),
               path_to_submitfile)
-    print(f"Wrote submit files to {path_to_wrapper} and {path_to_submitfile}.")
+    print(f"Wrote submit files to {path_to_wrapper} and {path_to_submitfile}")
 
 
 if __name__ == '__main__':
