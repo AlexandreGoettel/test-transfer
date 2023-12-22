@@ -48,8 +48,23 @@ def write_submit_wrapper(script_path):
 # The iteration number is passed by HTCondor as the process number
 ITERATION=$(($1 + $2))
 
+MC_STR=""
+if [ "${{10}}" == "True" ]; then
+    MC_STR="--isMC"
+fi
+
+INJ_STR=""
+if [ "${{11}}" != "None" ]; then
+    INJ_STR="--injection-path ${{11}}"
+fi
+
+INJ_PEAK_STR=""
+if [ "${{12}}" != "None" ]; then
+    INJ_PEAK_STR="--injection-peak-shape-path ${{12}}"
+fi
+
 # Call the Python script
-/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --ana-fmin $3 --ana-fmax $4 --Jdes $5 --data-path $6 --json-path $7 --peak-shape-path $8 --outdir $9 --isMC ${10} --injection-path ${11} --injection-peak-shape-path ${12} --prefix ${13} --n-processes ${14} --n-frequencies ${15}
+/home/alexandresebastien.goettel/.conda/envs/scalardarkmatter/bin/python {script_path} --iteration $ITERATION --ana-fmin $3 --ana-fmax $4 --Jdes $5 --data-path $6 --json-path $7 --peak-shape-path $8 --outdir $9 $INJ_STR $INJ_PEAK_STR --prefix ${{13}} --n-processes ${{14}} --n-frequencies ${{15}} ${{MC_STR}}
 """
     return _str
 
@@ -60,7 +75,7 @@ def write_submit_file(N_start, N_end, request_cpus, path_to_wrapper, outdir, pre
     """Write the condor submit file for DM hunting jobs."""
     out_path = os.path.join(outdir, f"{prefix}_$(Process)")
     args = f"{ana_fmin} {ana_fmax} {Jdes} {data_path} {json_path} {peak_shape_path} {outdir}" +\
-        f"{isMC} {injection_path} {injection_peak_shape_path} {prefix} {request_cpus} {n_freqs}"
+        f" {isMC} {injection_path} {injection_peak_shape_path} {prefix} {request_cpus} {n_freqs}"
     _str = f"""Universe = vanilla
 Executable = {path_to_wrapper}
 Arguments = $(Process) {N_start} {args}
