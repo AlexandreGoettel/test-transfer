@@ -34,6 +34,7 @@ SET(SOURCE
 	${SRCPATH}/netlibi0.c
 	${SRCPATH}/goodn.c
 	${SRCPATH}/ask.c
+	${SRCPATH}/fft.c
 )
 SET(HEADERS
 	${INCLUDEPATH}/IO.h
@@ -50,6 +51,7 @@ SET(HEADERS
 	${INCLUDEPATH}/netlibi0.h
 	${INCLUDEPATH}/goodn.h
 	${INCLUDEPATH}/ask.h
+	${INCLUDEPATH}/fft.h
 )
 
 # Set executable(s)
