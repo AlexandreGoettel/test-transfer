@@ -182,7 +182,7 @@ void getGNUTERM(int i, tGNUTERM *dest) {
 
 /* returns 0 if token is not contained at beginning of s, !0 otherwise */
 static int isToken(char *s, char *token) {
-	return (int)strstr(s,token);
+	return strstr(s, token) != NULL ? 1 : 0;
 }
 
 /* 
@@ -480,10 +480,8 @@ sprintf(&dest[strlen(dest)],"---Data--------------------------------------------
 
 static void printOutput(char *dest, tCFG cfg, tGNUTERM gt, tDATA data) {
 	char meth[2][SLEN]={"LPSD","FFTW"};
-	int avg;
 
-	avg=floor((data.nread-cfg.nfft)/(cfg.ovlp/100.)/cfg.nfft+1);
-sprintf(&dest[strlen(dest)],"---Output------------------------------------------------------------------\n");
+	sprintf(&dest[strlen(dest)],"---Output------------------------------------------------------------------\n");
 	sprintf(&dest[strlen(dest)],"Size: %ld\t\t",cfg.nspec);
 	sprintf(&dest[strlen(dest)],"Fmin (Hz): %.1e\t",cfg.fmin);
 	sprintf(&dest[strlen(dest)],"Fmax (Hz): %.1e\n",cfg.fmax);
@@ -508,14 +506,3 @@ void printConfig(char *dest, tCFG cfg, tWinInfo wi, tGNUTERM gt, tDATA data) {
 	printData(dest, cfg, data);
 	printOutput(dest, cfg, gt, data);
 }
-
-/*
-int main(int argc, char *argv[]) {
-	CFN=getenv(PSDCFN);
-	if (CFN==0) printf("%s not found\n",PSDCFN);
-	printf("Reading from config file %s.\n",CFN);
-	
-	
-	return(0);
-}
-*/

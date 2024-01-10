@@ -32,7 +32,6 @@ SET(SOURCE
 	${SRCPATH}/ArgParser.c
 	${SRCPATH}/StrParser.c
 	${SRCPATH}/netlibi0.c
-	${SRCPATH}/goodn.c
 	${SRCPATH}/ask.c
 	${SRCPATH}/fft.c
 )
@@ -49,7 +48,6 @@ SET(HEADERS
 	${INCLUDEPATH}/ArgParser.h
 	${INCLUDEPATH}/StrParser.h
 	${INCLUDEPATH}/netlibi0.h
-	${INCLUDEPATH}/goodn.h
 	${INCLUDEPATH}/ask.h
 	${INCLUDEPATH}/fft.h
 )

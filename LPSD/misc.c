@@ -20,5 +20,3 @@ void xfree(void *p) {
 	nallocs--;
 	free(p);
 }
-
-extern inline double dMax  ( double x, double y ) { return x > y ? x : y; }

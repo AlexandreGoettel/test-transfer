@@ -29,7 +29,6 @@
 #include "ArgParser.h"
 #include "StrParser.h"
 #include "lpsd-exec.h"
-#include "goodn.h"
 #include "errors.h"
 
 extern double round(double x);
@@ -155,8 +154,6 @@ void getUserInput()
 	if (cfg.fres < 0) {
 		xov = (1. - cfg.ovlp / 100.);
 		cfg.fres = 1. / (data.nread/cfg.fsamp) * (1 + xov * (cfg.minAVG - 1));
-		cfg.nfft=round_downl(cfg.fsamp/cfg.fres);	/* suitable nfft for FFTW */
-		cfg.fres = cfg.fsamp / (double) cfg.nfft;
 	}
 	if (cfg.fmax < 0)
 		cfg.fmax = cfg.fsamp / 2.0;
@@ -230,24 +227,6 @@ void getDefaultValues()
 	}    
 	if (cfg.fmax < 0)
 		cfg.fmax = cfg.fsamp / 2.0;
-
-	// If fmin_fft or fmax_fft are not set, they should align with fmin and fmax
-//	if (cfg.fmin_fft < 0)
-//		cfg.fmin_fft = cfg.fmin;
-//	if (cfg.fmax_fft < 0)
-//		cfg.fmax_fft = cfg.fmax;
-}
-
-/* for debugging */
-double calculate_mean(double *segm, int nfft)
-{
-	int i;
-	double m = 0;
-
-	for (i = 0; i < nfft; i++) {
-		m += segm[i];
-	}
-	return (m / (double) nfft);
 }
 
 void memalloc(tCFG * cfg, tDATA * data)
