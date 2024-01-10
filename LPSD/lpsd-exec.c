@@ -165,7 +165,7 @@ void getUserInput()
 		askd("Max. frequency", &cfg.fmax);
 	if (cfg.METHOD == 0 || cfg.METHOD == 1) {	
 		if (cfg.asknspec == 1)
-			aski("Number of samples in spectrum", &cfg.nspec);
+			askil("Number of samples in spectrum", &cfg.nspec);
 		if (cfg.askminAVG == 1)
 			aski("Minimum number of averages", &cfg.minAVG);	
 		if (cfg.askdesAVG == 1)

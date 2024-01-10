@@ -43,7 +43,7 @@
 #define PSTEP 0.2		/* time interval after which to print progress information on spectrum calculation */
 
 #define SLEN 100		/* config.c	- length of strings */
-#define CLEN 5000		/* config.c	- length of gunplot commands */
+#define CLEN 5000		/* config.c	- length of gnuplot commands */
 
 typedef struct {
 	int type;
