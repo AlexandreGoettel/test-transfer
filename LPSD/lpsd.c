@@ -216,6 +216,7 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   double dft_results[2*nsum];  /* Real and imaginary parts of DFTs */
   memset(dft_results, 0, 2*nsum*sizeof(double));
 
+  register unsigned int i;
   while (remaining_samples > 0)
   {
     if (remaining_samples > max_samples_in_memory)
@@ -234,7 +235,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
                           window_offset, count, window_offset == 0);
 
     // Loop over data segments
-    register unsigned int i;
     unsigned long int start = 0;
     register unsigned int _nsum = 0;
     hsize_t data_count[1] = {count};
