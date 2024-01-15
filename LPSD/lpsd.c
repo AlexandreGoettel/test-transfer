@@ -211,7 +211,7 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   int nsum = floor(1+(nread - nfft) / floor(nfft * (1.0 - (double) (ovlp / 100.))));
   long int tmp = (nsum-1)*floor(nfft * (1.0 - (double) (ovlp / 100.)))+nfft;
   if (tmp == nread) nsum--;  /* Adjust for edge case */
-  printf("nsum: %i\n", nsum);
+  printf("nsum: %i, nfft: %ld, nread: %ld, tmp: %ld\n", nsum, nfft, nread, tmp);
 
   double dft_results[2*nsum];  /* Real and imaginary parts of DFTs */
   memset(dft_results, 0, 2*nsum*sizeof(double));
@@ -247,7 +247,7 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
       read_from_dataset(contents, data_offset, data_count, data_rank, data_count, strain_data_segment);
 
       // Calculate DFT
-      printf("Calculate DFT_%i", _nsum);
+      printf("Calculate DFT_%i\n", _nsum);
       for (i = 0; i < count; i++)
       {
         dft_results[_nsum*2] += window[i*2] * strain_data_segment[i];
@@ -284,8 +284,8 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   /* clean up */
   xfree(window);
   xfree(strain_data_segment);
+  printf("Leaving getDFT2..\n");
 }
-
 
 /*
     calculates paramaters for DFTs
@@ -329,12 +329,12 @@ calc_params (tCFG * cfg, tDATA * data)
 void
 calculate_lpsd (tCFG * cfg, tDATA * data)
 {
-  int k;			/* 0..nspec */
-  int k_start = 0;		/* N. lines in save file. Post fail start point */
+  long int k;			/* 0..nspec */
+  long int k_start = 0;		/* N. lines in save file. Post fail start point */
+  long int j; 			/* Iteration variables for checkpointing data */
+  long int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
   char ch;			/* For scanning through checkpointing file */
-  int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
   int max_samples_in_memory = pow(2, cfg->n_max_mem);
-  int j; 			/* Iteration variables for checkpointing data */
   FILE * file1;			/* Output file, temp for checkpointing */
   double rslt[4];		/* rslt[0]=PSD, rslt[1]=variance(PSD) rslt[2]=PS rslt[3]=variance(PS) */
   double progress;
@@ -357,7 +357,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
       printf("No backup file. Starting from fmin\n");
       k_start = 0;
   }
-  printf ("Checkpointing every %i iterations\n", Nsave);
+  printf ("Checkpointing every %ld iterations\n", Nsave);
   printf ("Computing output:  00.0%%");
   fflush (stdout);
   gettimeofday (&tv, NULL);
