@@ -231,6 +231,7 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
     memory_unit_index++;
 
     // Calculate window
+    printf("Calculating window..\n");
     makewinsincos_indexed(nfft, bin, window, &winsum, &winsum2, &nenbw,
                           window_offset, count, window_offset == 0);
 
@@ -246,6 +247,7 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
       read_from_dataset(contents, data_offset, data_count, data_rank, data_count, strain_data_segment);
 
       // Calculate DFT
+      printf("Calculate DFT_%i", _nsum);
       for (i = 0; i < count; i++)
       {
         dft_results[_nsum*2] += window[i*2] * strain_data_segment[i];
