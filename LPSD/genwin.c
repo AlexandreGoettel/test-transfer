@@ -608,8 +608,8 @@ makewinsincos (long int nfft, double bin, double *win, double *winsum,
 // @brief Other parameters are from legacy code
 // @param reset_sums Set winsum,winsum2 back to zero before loop
 void
-makewinsincos_indexed (long int nfft, double bin, double *win, double *winsum,
-		   double *winsum2, double *nenbw, int start_index, int count,
+makewinsincos_indexed (unsigned long int nfft, double bin, double *win, double *winsum,
+		   double *winsum2, double *nenbw, unsigned long int start_index, unsigned int count,
 		   bool reset_sums)
 {
   // Make sure that the function was called correctly

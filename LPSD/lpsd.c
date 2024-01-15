@@ -204,12 +204,14 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
 
   //////////////////////////////////////////////////
   /* Calculate DFT over separate memory windows */
-  int window_offset, count;
+  long int window_offset;
+  int count;
   int memory_unit_index = 0;
   long int remaining_samples = nfft;
   int nsum = floor(1+(nread - nfft) / floor(nfft * (1.0 - (double) (ovlp / 100.))));
   long int tmp = (nsum-1)*floor(nfft * (1.0 - (double) (ovlp / 100.)))+nfft;
   if (tmp == nread) nsum--;  /* Adjust for edge case */
+  printf("nsum: %i\n", nsum);
 
   double dft_results[2*nsum];  /* Real and imaginary parts of DFTs */
   memset(dft_results, 0, 2*nsum*sizeof(double));
@@ -232,8 +234,9 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
                           window_offset, count, window_offset == 0);
 
     // Loop over data segments
-    long int start = 0;
-    register int _nsum = 0;
+    register unsigned int i;
+    unsigned long int start = 0;
+    register unsigned int _nsum = 0;
     hsize_t data_count[1] = {count};
     hsize_t data_rank = 1;
     while (start + nfft < nread)
@@ -243,7 +246,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
       read_from_dataset(contents, data_offset, data_count, data_rank, data_count, strain_data_segment);
 
       // Calculate DFT
-      register int i;
       for (i = 0; i < count; i++)
       {
         dft_results[_nsum*2] += window[i*2] * strain_data_segment[i];
@@ -255,7 +257,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   }
 
   /* Sum over dft_results to get total */
-  register int i;
   double total = 0;  /* Running sum of DFTs */
   for (i = 0; i < nsum; i++)
   {
