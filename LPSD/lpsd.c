@@ -188,14 +188,12 @@ fill_ordered_coefficients(int n, int *coefficients) {
     }
 }
 
-
 static void
 getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
          int *avg, struct hdf5_contents *contents, int max_samples_in_memory)
 {
   /* Configure variables for DFT */
   if (max_samples_in_memory > nfft) max_samples_in_memory = nfft; // Don't allocate more than you need
-  // TODO: getDFT2 will stop working if there are more than 2 segments at j0=0 !!
 
   /* Allocate data and window memory segments */
   double *strain_data_segment = (double*) xmalloc(max_samples_in_memory * sizeof(double));
@@ -211,7 +209,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   int nsum = floor(1+(nread - nfft) / floor(nfft * (1.0 - (double) (ovlp / 100.))));
   long int tmp = (nsum-1)*floor(nfft * (1.0 - (double) (ovlp / 100.)))+nfft;
   if (tmp == nread) nsum--;  /* Adjust for edge case */
-  printf("nsum: %i, nfft: %ld, nread: %ld, tmp: %ld\n", nsum, nfft, nread, tmp);
 
   double dft_results[2*nsum];  /* Real and imaginary parts of DFTs */
   memset(dft_results, 0, 2*nsum*sizeof(double));
@@ -231,7 +228,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
     memory_unit_index++;
 
     // Calculate window
-    printf("Calculating window..\n");
     makewinsincos_indexed(nfft, bin, window, &winsum, &winsum2, &nenbw,
                           window_offset, count, window_offset == 0);
 
@@ -247,7 +243,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
       read_from_dataset(contents, data_offset, data_count, data_rank, data_count, strain_data_segment);
 
       // Calculate DFT
-      printf("Calculate DFT_%i\n", _nsum);
       for (i = 0; i < count; i++)
       {
         dft_results[_nsum*2] += window[i*2] * strain_data_segment[i];
@@ -284,7 +279,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   /* clean up */
   xfree(window);
   xfree(strain_data_segment);
-  printf("Leaving getDFT2..\n");
 }
 
 /*
@@ -333,6 +327,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   long int k_start = 0;		/* N. lines in save file. Post fail start point */
   long int j; 			/* Iteration variables for checkpointing data */
   long int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
+  if (Nsave < 1) Nsave = 1;
   char ch;			/* For scanning through checkpointing file */
   int max_samples_in_memory = pow(2, cfg->n_max_mem);
   FILE * file1;			/* Output file, temp for checkpointing */
@@ -382,13 +377,13 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
       if (now - print > PSTEP)
     {
       print = now;
-      progress = (100 * ((double) k)) / ((double) ((*cfg).nspec));
+      progress = (100 * ((double) k) + 1) / ((double) ((*cfg).nspec));
       printf ("\b\b\b\b\b\b%5.1f%%", progress);
       fflush (stdout);
     }
 
       /* If k is a multiple of Nsave then write data to backup file */
-      if(k % Nsave  == 0 && k != k_start){
+      if(k % Nsave == 0 && k != k_start){
           file1 = fopen((*cfg).ofn, "a");
           for(j=k-Nsave; j<k; j++){
         fprintf(file1, "%e	", (*data).psd[j]);
