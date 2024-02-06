@@ -233,12 +233,15 @@ void memalloc(tCFG *cfg, tDATA *data, DataPointers *dp) {
 	// Adjust the following arrays following tData
     double **doubleMembers[] = {&data->fspec, &data->bins, &data->ps, &data->psd, &data->varps, &data->varpsd,
                                 &data->psd_real, &data->psd_imag, &data->psd_raw, &data->psd_raw_real, &data->psd_raw_imag};
-    int **intMembers[] = {&data->nffts, &data->avg};
+    int **intMembers[] = {&data->avg};
+    long int **liMembers[] = {&data->nffts};
 
     dp->numDoublePointers = sizeof(doubleMembers) / sizeof(doubleMembers[0]);
     dp->doublePointers = (double **) xmalloc(dp->numDoublePointers * sizeof(double *));
     dp->numIntPointers = sizeof(intMembers) / sizeof(intMembers[0]);
     dp->intPointers = (int **) xmalloc(dp->numIntPointers * sizeof(int *));
+    dp->numLiPointers = sizeof(liMembers) / sizeof(liMembers[0]);
+    dp->liPointers = (long int **) xmalloc(dp->numLiPointers * sizeof(long int *));
 
     for (int i = 0; i < dp->numDoublePointers; ++i) {
         *(doubleMembers[i]) = (double *) xmalloc(cfg->nspec * sizeof(double));
@@ -248,6 +251,10 @@ void memalloc(tCFG *cfg, tDATA *data, DataPointers *dp) {
     for (int i = 0; i < dp->numIntPointers; i++) {
 		*(intMembers[i]) = (int *) xmalloc(cfg->nspec * sizeof(int));
 		dp->intPointers[i] = *(intMembers[i]);
+    }
+    for (int i = 0; i < dp->numLiPointers; i++) {
+		*(liMembers[i]) = (long int *) xmalloc(cfg->nspec * sizeof(long int));
+		dp->liPointers[i] = *(liMembers[i]);
     }
 }
 

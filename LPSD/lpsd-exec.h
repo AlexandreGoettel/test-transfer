@@ -5,7 +5,8 @@ typedef struct {
     double **doublePointers;
     size_t numDoublePointers;
     int **intPointers;
-    size_t numIntPointers;
+    long int **liPointers;
+    size_t numIntPointers, numLiPointers;
 } DataPointers;
 
 #endif 
