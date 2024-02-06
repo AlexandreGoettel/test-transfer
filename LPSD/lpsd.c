@@ -125,7 +125,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
 {
   /* Configure variables for DFT */
   if (max_samples_in_memory > nfft) max_samples_in_memory = nfft; // Don't allocate more than you need
-  // TODO: getDFT2 will stop working if there are more than 2 segments at j0=0 !!
 
   /* Allocate data and window memory segments */
   double *strain_data_segment = (double*) xmalloc(max_samples_in_memory * sizeof(double));
@@ -134,7 +133,8 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
 
   //////////////////////////////////////////////////
   /* Calculate DFT over separate memory windows */
-  int window_offset, count;
+  long int window_offset;
+  int count;
   int memory_unit_index = 0;
   long int remaining_samples = nfft;
   int nsum = floor(1+(nread - nfft) / floor(nfft * (1.0 - (double) (ovlp / 100.))));
@@ -144,6 +144,7 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   double dft_results[2*nsum];  /* Real and imaginary parts of DFTs */
   memset(dft_results, 0, 2*nsum*sizeof(double));
 
+  register unsigned int i;
   while (remaining_samples > 0)
   {
     if (remaining_samples > max_samples_in_memory)
@@ -162,8 +163,8 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
                           window_offset, count, window_offset == 0);
 
     // Loop over data segments
-    long int start = 0;
-    register int _nsum = 0;
+    unsigned long int start = 0;
+    register unsigned int _nsum = 0;
     hsize_t data_count[1] = {count};
     hsize_t data_rank = 1;
     while (start + nfft < nread)
@@ -173,7 +174,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
       read_from_dataset(contents, data_offset, data_count, data_rank, data_count, strain_data_segment);
 
       // Calculate DFT
-      register int i;
       for (i = 0; i < count; i++)
       {
         dft_results[_nsum*2] += window[i*2] * strain_data_segment[i];
@@ -185,7 +185,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   }
 
   /* Sum over dft_results to get total */
-  register int i;
   double total = 0;  /* Running sum of DFTs */
   for (i = 0; i < nsum; i++)
   {
@@ -212,7 +211,6 @@ getDFT2 (long int nfft, double bin, double fsamp, double ovlp, double *rslt,
   xfree(window);
   xfree(strain_data_segment);
 }
-
 
 /*
     calculates paramaters for DFTs
@@ -256,12 +254,13 @@ calc_params (tCFG * cfg, tDATA * data)
 void
 calculate_lpsd (tCFG * cfg, tDATA * data)
 {
-  int k;			/* 0..nspec */
-  int k_start = 0;		/* N. lines in save file. Post fail start point */
+  long int k;			/* 0..nspec */
+  long int k_start = 0;		/* N. lines in save file. Post fail start point */
+  long int j; 			/* Iteration variables for checkpointing data */
+  long int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
+  if (Nsave < 1) Nsave = 1;
   char ch;			/* For scanning through checkpointing file */
-  int Nsave = (*cfg).nspec / 100; /* Frequency of data checkpointing */
   int max_samples_in_memory = pow(2, cfg->n_max_mem);
-  int j; 			/* Iteration variables for checkpointing data */
   FILE * file1;			/* Output file, temp for checkpointing */
   double rslt[4];		/* rslt[0]=PSD, rslt[1]=variance(PSD) rslt[2]=PS rslt[3]=variance(PS) */
   double progress;
@@ -284,7 +283,7 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
       printf("No backup file. Starting from fmin\n");
       k_start = 0;
   }
-  printf ("Checkpointing every %i iterations\n", Nsave);
+  printf ("Checkpointing every %ld iterations\n", Nsave);
   printf ("Computing output:  00.0%%");
   fflush (stdout);
   gettimeofday (&tv, NULL);
@@ -309,13 +308,13 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
       if (now - print > PSTEP)
     {
       print = now;
-      progress = (100 * ((double) k)) / ((double) ((*cfg).nspec));
+      progress = (100 * ((double) k) + 1) / ((double) ((*cfg).nspec));
       printf ("\b\b\b\b\b\b%5.1f%%", progress);
       fflush (stdout);
     }
 
       /* If k is a multiple of Nsave then write data to backup file */
-      if(k % Nsave  == 0 && k != k_start){
+      if(k % Nsave == 0 && k != k_start){
           file1 = fopen((*cfg).ofn, "a");
           for(j=k-Nsave; j<k; j++){
         fprintf(file1, "%e	", (*data).psd[j]);

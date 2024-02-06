@@ -144,7 +144,7 @@ typedef struct {
 	double *psd_raw_real;	/* non-interpolated real and imag terms (linear in f) */
 	double *psd_raw_imag;
 	int *avg;			/* debug information: number of averages */
-	int *nffts;			/* list of nffts for DFTs */
+	long int *nffts;			/* list of nffts for DFTs */
 	int NoC;			/* number of columns in data file */
 	double mean;			/* mean value of input data */
 	long int ndata;			/* number of data in input file */
