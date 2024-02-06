@@ -594,6 +594,34 @@ set_window (int type, double req_psll, char *name, double *psll, double *rov,
 	gerror ("illegal window type");
 }
 
+//@brief Analytical implementation of spectral Kernel with Kaiser window
+void
+makekernel()
+{
+	// double kaiser_scal = netlibi0 (M_PI * win_alpha);
+	// Don't divide by kaiser_scal -> handled in normalisation
+	//	def get_spectral_window_ana(f, N, beta):
+	//		_sqrt_term = (np.pi*N*f)**2 - beta**2
+	//		sin_term = np.sin(np.sqrt(_sqrt_term)) / np.sqrt(_sqrt_term)
+	//		mask = _sqrt_term < 0
+	//		sinh_term = np.sinh(np.sqrt(-_sqrt_term[mask])) / np.sqrt(-_sqrt_term[mask])
+	//		output = sin_term
+	//		output[mask] = sinh_term
+	//		return output / bessel(0, beta)
+	for (int i = 0; i < size; i++) {
+        double _sqrt_term = pow(M_PI * N * f[i], 2) - pow(beta, 2);
+        if (_sqrt_term >= 0) {
+            double sin_term = sin(sqrt(_sqrt_term)) / sqrt(_sqrt_term);
+            output[i] = (_sqrt_term == 0) ? 1 : sin_term; // Handle division by zero as limit approaches
+        } else {
+            double sinh_term = sinh(sqrt(-_sqrt_term)) / sqrt(-_sqrt_term);
+            output[i] = sinh_term;
+        }
+    }
+
+    double bessel0_beta = bessel0(beta);
+}
+
 // @brief Wrapper for makewinsincos_indexed
 // @brief Calling this function will simply create the window for the entire segment
 void

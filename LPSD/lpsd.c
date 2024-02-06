@@ -343,6 +343,119 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 }
 
+// @brief Use constant Q approximation
+// @brief This will only work when using the Kaiser window.
+void
+calculate_constQ_approx (tCFG *cfg, tDATA *data)
+{
+	// Track time and progress
+    struct timeval tv;
+    printf("Computing output:  00.0%%");
+    fflush(stdout);
+    gettimeofday(&tv, NULL);
+    double start = tv.tv_sec + tv.tv_usec / 1e6;
+    double now, print, progress;
+    print = now = start;
+
+	// Prepare data file
+	struct hdf5_contents contents;
+	read_hdf5_file(&contents, (*cfg).ifn, (*cfg).dataset_name);
+
+	// ###### START ANALYSIS ###### //
+	// Get Nj0 and other vars, but with m as integer
+	double g = log(cfg->fmax / cfg->fmin);
+	int m = round(1. / (exp(g / (cfg->Jdes - 1.)) - 1.));
+	unsigned long int Nj0 = round(fs*m/fmin);
+	// Make sure Nj0 is even (tmp?)
+	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
+
+	// FFT over the data
+	unsigned long int Nfft = get_next_power_of_two(Nj0);
+	// TODO: memory management for big-data scenarios
+	double *data_real, data_imag, fft_real, fft_imag;
+	data_real = (double*) xmalloc(Nfft * sizeof(double));
+	data_imag = (double*) xmalloc(Nfft * sizeof(double));
+	fft_real = (double*) xmalloc(Nfft * sizeof(double));
+	fft_imag = (double*) xmalloc(Nfft * sizeof(double));
+	memset(data_imag, 0, Nfft * sizeof(double));
+
+	// Read and FFT data
+	hsize_t offset[1] = {0};
+	hsize_t count[1] = {Nj0};
+	hsize_t data_rank = 1;
+	hsize_t data_count[1] = {count[0]};
+	read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
+	FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
+
+	// Loop over frequencies
+	// Idea: could use Taylor approx math for normalisation?
+	// TODO: write maths to find max Taylor distance for given deviation
+	// For now just do it manually
+	for (int j = 0; j < cfg->Jdes; j++) {
+		// - Analytical kernel calculation
+		// 		- Find limits based on threshold & calculate
+		// f -> freqs / fs - m / Lj | where freqs is fft_freqs, Give Lj-1 as N
+		// Position of peak: fs*m_over_Lj
+		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
+		// Make sure Lj is even (tmp?)
+		Lj = (Lj % 2) ? Lj - 1 : Lj;
+		double search_freq = cfg->fsamp * m / Lj;  // Position of spectral peak
+		double ref_kernel = get_kernel(search_freq, cfg->fsamp, m / Lj, Lj - 1);
+		double kernel_val = ref_kernel;
+		double rel_threshold = 1e-10;  // TODO: don't hard-code this
+
+		// Get position in FFT bin freq
+		unsigned long int ikernel = round(Nfft * cfg->fsamp / search_freq);
+		unsigned long int delta_i = 0;
+		while (kernel_val > ref_kernel * rel_threshold) {
+			delta_i++;
+			if (ikernel + delta_i >= cfg->Jdes - 1) break;
+			search_freq = cfg->fsamp / Nfft * (ikernel + delta_i);
+			kernel_val = get_kernel(search_freq, cfg->fsamp, m / Lj, Lj - 1);
+			// TODO: save kernel_vals to mem during the search means no need for recalc. below
+			// Also uses symmetry
+		}
+
+		// delta_i = kernel_idx - 1
+		// Just sum over +- delta_i, divide by Lj, and make sure you save data on the right idx.
+		double total_real = 0, total_imag = 0;
+		double fft_freq;
+		for (int i = max(1, ikernel - delta_i + 1); i < min(ikernel + delta_i, Jdes - 1); i++) {  // start from 0?
+			fft_freq = cfg->fsamp / Nfft * (ikernel + delta_i);
+			kernel_val = get_kernel(fft_freq, cfg->fsamp, m / Lj, Lj - 1);
+			total_real += fft_real[i] * kernel_val;
+			total_imag += fft_imag[i] * kernel_val;
+		}
+
+		// - Fill data arrays
+		// TODO: implement segmenting
+		// TODO: Find other way to get winsum2... maybe Taylor terms (see above)
+		makewin(Lj, window, &winsum, &winsum2, &nenbw);
+		double norm_psd = 2. / (1 * cfg->fsamp * winsum2);  // 1 as avg placeholder
+		data->psd[j] = (total_real * total_real + total_imag * total_imag) * norm_psd;
+		data->avg[j] = 1;
+
+		// Progress tracking
+		if (j % 1000) {
+			progress = 100. * (double) j / cfg->Jdes;
+			printf ("\b\b\b\b\b\b%5.1f%%", progress);
+			fflush (stdout);
+        }
+	}
+
+	// Clean-up
+	xfree(data_real);
+	xfree(data_imag);
+	xfree(fft_real);
+	xfree(fft_imag);
+
+	// Finish
+    close_hdf5_contents(&contents);
+    printf ("\b\b\b\b\b\b  100%%\n");
+    fflush (stdout);
+    gettimeofday (&tv, NULL);
+    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
+}
 
 // @brief Use const. N approximation for a given epsilon
 void
@@ -600,8 +713,9 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
   nread = floor (((*cfg).tmax - (*cfg).tmin) * (*cfg).fsamp + 1);
 
   calc_params (cfg, data);
-  if ((*cfg).METHOD == 0) calculate_lpsd (cfg, data);
-  else if ((*cfg).METHOD == 1) calculate_fft_approx (cfg, data);
+  if ((*cfg).METHOD == 0) calculate_lpsd(cfg, data);
+//  else if ((*cfg).METHOD == 1) calculate_fft_approx(cfg, data);
+  else if ((*cfg).METHOD == 1) calculate_constQ_approx(cfg, data);
   else gerror("Method not implemented.");
 }
 
