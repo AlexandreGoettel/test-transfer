@@ -595,31 +595,16 @@ set_window (int type, double req_psll, char *name, double *psll, double *rov,
 }
 
 //@brief Analytical implementation of spectral Kernel with Kaiser window
-void
-makekernel()
+double
+get_kernel(double freq, double fsamp, double m_over_Lj, double N)
 {
-	// double kaiser_scal = netlibi0 (M_PI * win_alpha);
-	// Don't divide by kaiser_scal -> handled in normalisation
-	//	def get_spectral_window_ana(f, N, beta):
-	//		_sqrt_term = (np.pi*N*f)**2 - beta**2
-	//		sin_term = np.sin(np.sqrt(_sqrt_term)) / np.sqrt(_sqrt_term)
-	//		mask = _sqrt_term < 0
-	//		sinh_term = np.sinh(np.sqrt(-_sqrt_term[mask])) / np.sqrt(-_sqrt_term[mask])
-	//		output = sin_term
-	//		output[mask] = sinh_term
-	//		return output / bessel(0, beta)
-	for (int i = 0; i < size; i++) {
-        double _sqrt_term = pow(M_PI * N * f[i], 2) - pow(beta, 2);
-        if (_sqrt_term >= 0) {
-            double sin_term = sin(sqrt(_sqrt_term)) / sqrt(_sqrt_term);
-            output[i] = (_sqrt_term == 0) ? 1 : sin_term; // Handle division by zero as limit approaches
-        } else {
-            double sinh_term = sinh(sqrt(-_sqrt_term)) / sqrt(-_sqrt_term);
-            output[i] = sinh_term;
-        }
-    }
-
-    double bessel0_beta = bessel0(beta);
+	double kaiser_scal = netlibi0 (M_PI * win_alpha);
+	double shifted_freq = freq / fsamp - m_over_Lj;
+//	printf("freq, shifted_freq, Lj, alpha: %e, %e, %f, %f\n", freq, shifted_freq, N, win_alpha);
+	double _sqrt_term = pow(M_PI * N * shifted_freq, 2) - pow(M_PI * win_alpha, 2);
+	double output = _sqrt_term < 0 ? sinh(sqrt(-_sqrt_term)) / sqrt(-_sqrt_term)
+								   : sin(sqrt(_sqrt_term)) / sqrt(_sqrt_term);
+	return output / kaiser_scal;
 }
 
 // @brief Wrapper for makewinsincos_indexed
@@ -630,7 +615,6 @@ makewinsincos (long int nfft, double bin, double *win, double *winsum,
 {
 	makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft, true);
 }
-
 
 // @brief Construct window from "start_index" on, for "count" bins
 // @brief Other parameters are from legacy code

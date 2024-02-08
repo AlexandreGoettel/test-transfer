@@ -20,4 +20,6 @@ void makewin_indexed (unsigned long int nfft, unsigned long int offset, unsigned
               double *win, double *winsum, double *winsum2, double *nenbw,
               bool reset_sums);
 
+double get_kernel(double, double, double, double);
+
 #endif
