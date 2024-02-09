@@ -369,8 +369,15 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	// Make sure Nj0 is even (tmp?)
 	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
 
-	// FFT over the data
-	unsigned long int Nfft = get_next_power_of_two(Nj0);
+	// Calculate window normalisation proportionality constant
+	// Is using Nj0 really necessary here?
+	double *window = (double*) xmalloc(Nj0 * sizeof(double));
+	makewin(Nj0, window, &winsum, &winsum2, &nenbw);
+	xfree(window);
+	double norm_propto_factor = winsum2 / (double) Nj0;
+
+	// FFT over the (whole!) data
+	unsigned long int Nfft = get_next_power_of_two(nread);
 	// TODO: memory management for big-data scenarios
 	double *data_real, *data_imag, *fft_real, *fft_imag;
 	data_real = (double*) xmalloc(Nfft * sizeof(double));
@@ -378,6 +385,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	fft_real = (double*) xmalloc(Nfft * sizeof(double));
 	fft_imag = (double*) xmalloc(Nfft * sizeof(double));
 	memset(data_imag, 0, Nfft * sizeof(double));
+	for (int i = Nj0; i < Nfft; i++) data_real[i] = 0;
 
 	// Read and FFT data
 	hsize_t offset[1] = {0};
@@ -388,34 +396,27 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
 
 	// Loop over frequencies
-	// Idea: could use Taylor approx math for normalisation?
-	// TODO: write maths to find max Taylor distance for given deviation
-	// For now just do it manually
 	for (int j = 0; j < cfg->Jdes; j++) {
-		// - Analytical kernel calculation
-		// 		- Find limits based on threshold & calculate
-		// f -> freqs / fs - m / Lj | where freqs is fft_freqs, Give Lj-1 as N
-		// Position of peak: fs*m_over_Lj
+		// Prepare segment loop parameters
 		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
 		// Make sure Lj is even (tmp?)
 		Lj = (Lj % 2) ? Lj - 1 : Lj;
+		unsigned long int delta_segment = floor(Lj * (1.0 - (double) (cfg->ovlp / 100.)));
+		unsigned int n_segments = floor(1 + (nread - Lj) / delta_segment);
+		/* Adjust for edge case */
+		long int tmp = (n_segments - 1)*delta_segment + Lj;
+		if (tmp == nread) n_segments--;
+
+		// Initialise segment loop vars
 		double m_over_Lj = (double) m / (double) Lj;
-//		printf("m, Lj, m/Lj: %i, %lu, %e\n", m, Lj, m_over_Lj);
+		// Get position in FFT bin freq
 		double search_freq = cfg->fsamp * m_over_Lj;  // Position of spectral peak
 		double ref_kernel = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 		double kernel_val = ref_kernel;
 		double rel_threshold = 1e-10;  // TODO: don't hard-code this
-
-		// Get position in FFT bin freq
 		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
 		unsigned long int ikernel = round(search_freq / fft_resolution);
-//		printf("val, ikernel, Jdes, freq: %e, %lu, %i, %e\n", ref_kernel, ikernel, cfg->Jdes, search_freq);
-//		printf("HM: %e, %e\n", kernel_val, ref_kernel * rel_threshold);
-//		for (int i = 0; i < 10; i++) {
-//			search_freq = cfg->fsamp / Nfft * (ikernel + i);
-//			kernel_val = get_kernel(search_freq, cfg->fsamp, m / Lj, Lj - 1);
-//			printf("val: %e\n", kernel_val);
-//		}
+
 		// Get delta_i
 		unsigned long int delta_i = 0;
 		while (kernel_val > ref_kernel * rel_threshold) {
@@ -424,48 +425,44 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			search_freq = fft_resolution * (double)(ikernel + delta_i);
 			kernel_val = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 		}
-
-		// Sum over +- delta_i & divide by Lj
-		double total_real = 0, total_imag = 0;
-		double fft_freq;
 		int start_i = ikernel - (delta_i - 1) < 1 ? 1 : ikernel - (delta_i - 1);
 		int end_i = ikernel + delta_i < cfg->Jdes - 1 ? ikernel + delta_i : cfg->Jdes - 1;
-//		if (end_i - start_i > 0) {
-//			printf("start/end; %i/%i\n", start_i, end_i);
-//			printf("Jdes, ikernel, delta_i, delta: %u, %lu, %lu, %i\n", cfg->Jdes, ikernel, delta_i, end_i - start_i);
-//		}
-		double sign;
-		for (int i = start_i; i < end_i; i++) {
-			fft_freq = cfg->fsamp / Nfft * i;
-			kernel_val = get_kernel(fft_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 
-			sign = i % 2 ? -1 : +1;
-			total_real += fft_real[i] * kernel_val * sign;
-			total_imag += fft_imag[i] * kernel_val * sign;
+		// Loop over segments
+		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
+
+		for (int k = 0; k < n_segments; k++) {
+			// Sum over +- delta_i & normalise
+			segment_real = 0;
+			segment_imag = 0;
+			for (int i = start_i; i < end_i; i++) {
+				// Adjust data location by multiplying exp's to the spectral terms
+				exp_factor = 2*M_PI*(double)i/(double)Nfft*(double)(k*delta_segment);
+				shift_real = cos(exp_factor);
+				shift_imag = sin(exp_factor);
+
+				fft_freq = cfg->fsamp / Nfft * i;
+				kernel_val = get_kernel(fft_freq, cfg->fsamp, m_over_Lj, Lj - 1);
+				sign = i % 2 ? -1 : +1;
+
+				segment_real += kernel_val*sign * (fft_real[i]*shift_real - fft_imag[i]*shift_imag);
+				segment_imag += kernel_val*sign * (fft_real[i]*shift_imag + fft_imag[i]*shift_real);
+			}
+			total += (segment_real*segment_real + segment_imag*segment_imag);
 		}
-		total_real *= (double) Lj / (double) Nfft;
-		total_imag *= (double) Lj / (double) Nfft;
+		total *= pow((double) Lj / (double) Nfft, 2);
 
 		// - Fill data arrays
-		// TODO: implement segmenting
-		// TODO: Find other way to get winsum2... maybe Taylor terms (see above)
-		double *window = (double*) xmalloc(Lj * sizeof(double));
-		makewin(Lj, window, &winsum, &winsum2, &nenbw);
-//		winsum2 = 1e30;
-		double norm_psd = 2. / (1 * cfg->fsamp * winsum2);  // 1 as avg placeholder
-		data->psd[j] = (total_real * total_real + total_imag * total_imag) * norm_psd;
-		data->avg[j] = 1;
-//		printf("j, result: %i, %f\n", j, data->psd[j]);
-//		printf("winsum2, norm_psd, total_real, total_imag: %e, %e, %e, %e\n", winsum2, norm_psd, total_real, total_imag);
+		double norm_psd = 2. / (n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
+		data->psd[j] = total * norm_psd;
+		data->avg[j] = n_segments;
 
 		// Progress tracking
-//		if (j >= 2000) break;
 		if (j % 100 == 0) {
 			progress = 100. * (double) j / cfg->Jdes;
 			printf ("\b\b\b\b\b\b%5.1f%%", progress);
 			fflush (stdout);
         }
-        xfree(window);
 	}
 
 	// Clean-up
