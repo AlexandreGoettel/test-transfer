@@ -410,10 +410,10 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		// Initialise segment loop vars
 		double m_over_Lj = (double) m / (double) Lj;
 		// Get position in FFT bin freq
-		double search_freq = cfg->fsamp * m_over_Lj;  // Position of spectral peak
+		double search_freq = cfg->fsamp * m_over_Lj;  // Position of spectral peak in Hz
 		double ref_kernel = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 		double kernel_val = ref_kernel;
-		double rel_threshold = 1e-10;  // TODO: don't hard-code this
+		double rel_threshold = 1e-2;  // TODO: don't hard-code this
 		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
 		unsigned long int ikernel = round(search_freq / fft_resolution);
 
@@ -421,12 +421,12 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		unsigned long int delta_i = 0;
 		while (kernel_val > ref_kernel * rel_threshold) {
 			delta_i++;
-			if (ikernel + delta_i >= cfg->Jdes - 1) break;
+			if (ikernel + delta_i >= Nfft) break;
 			search_freq = fft_resolution * (double)(ikernel + delta_i);
 			kernel_val = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 		}
 		int start_i = ikernel - (delta_i - 1) < 1 ? 1 : ikernel - (delta_i - 1);
-		int end_i = ikernel + delta_i < cfg->Jdes - 1 ? ikernel + delta_i : cfg->Jdes - 1;
+		int end_i = ikernel + delta_i;
 
 		// Loop over segments
 		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
@@ -455,7 +455,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		// - Fill data arrays
 		double norm_psd = 2. / (n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
 		data->psd[j] = total * norm_psd;
-		data->avg[j] = n_segments;
+		data->avg[j] = delta_i;//n_segments;
 
 		// Progress tracking
 		if (j % 100 == 0) {
