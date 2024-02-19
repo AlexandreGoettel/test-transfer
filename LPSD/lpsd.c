@@ -385,11 +385,11 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	fft_real = (double*) xmalloc(Nfft * sizeof(double));
 	fft_imag = (double*) xmalloc(Nfft * sizeof(double));
 	memset(data_imag, 0, Nfft * sizeof(double));
-	for (int i = Nj0; i < Nfft; i++) data_real[i] = 0;
+	for (int i = nread; i < Nfft; i++) data_real[i] = 0;
 
 	// Read and FFT data
 	hsize_t offset[1] = {0};
-	hsize_t count[1] = {Nj0};
+	hsize_t count[1] = {nread-1};
 	hsize_t data_rank = 1;
 	hsize_t data_count[1] = {count[0]};
 	read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
@@ -413,7 +413,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		double search_freq = cfg->fsamp * m_over_Lj;  // Position of spectral peak in Hz
 		double ref_kernel = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 		double kernel_val = ref_kernel;
-		double rel_threshold = 1e-2;  // TODO: don't hard-code this
+		double rel_threshold = 1e-20;  // TODO: don't hard-code this
 		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
 		unsigned long int ikernel = round(search_freq / fft_resolution);
 
@@ -425,19 +425,19 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			search_freq = fft_resolution * (double)(ikernel + delta_i);
 			kernel_val = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 		}
-		int start_i = ikernel - (delta_i - 1) < 1 ? 1 : ikernel - (delta_i - 1);
-		int end_i = ikernel + delta_i;
+		unsigned long int start_i = ikernel - (delta_i - 1) < 1 ? 1 : ikernel - (delta_i - 1);
+		unsigned long int end_i = ikernel + delta_i;
 
 		// Loop over segments
 		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
-
 		for (int k = 0; k < n_segments; k++) {
 			// Sum over +- delta_i & normalise
 			segment_real = 0;
 			segment_imag = 0;
-			for (int i = start_i; i < end_i; i++) {
+			for (unsigned long int i = start_i; i < end_i; i++) {
 				// Adjust data location by multiplying exp's to the spectral terms
-				exp_factor = 2*M_PI*(double)i/(double)Nfft*(double)(k*delta_segment);
+//				exp_factor = -2*M_PI*(double)i/(double)Nfft*(double)(k*delta_segment);
+				exp_factor = -2*M_PI*(double)i/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
 
@@ -453,9 +453,9 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		total *= pow((double) Lj / (double) Nfft, 2);
 
 		// - Fill data arrays
-		double norm_psd = 2. / (n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
+		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
 		data->psd[j] = total * norm_psd;
-		data->avg[j] = delta_i;//n_segments;
+		data->avg[j] = n_segments;
 
 		// Progress tracking
 		if (j % 100 == 0) {
