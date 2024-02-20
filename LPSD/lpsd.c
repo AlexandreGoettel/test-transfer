@@ -370,7 +370,6 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
 
 	// Calculate window normalisation proportionality constant
-	// Is using Nj0 really necessary here?
 	double *window = (double*) xmalloc(Nj0 * sizeof(double));
 	makewin(Nj0, window, &winsum, &winsum2, &nenbw);
 	xfree(window);
@@ -413,13 +412,12 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		double search_freq = cfg->fsamp * m_over_Lj;  // Position of spectral peak in Hz
 		double ref_kernel = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
 		double kernel_val = ref_kernel;
-		double rel_threshold = 1e-20;  // TODO: don't hard-code this
 		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
 		unsigned long int ikernel = round(search_freq / fft_resolution);
 
 		// Get delta_i
 		unsigned long int delta_i = 0;
-		while (kernel_val > ref_kernel * rel_threshold) {
+		while (kernel_val > ref_kernel * cfg->constQ_rel_threshold) {
 			delta_i++;
 			if (ikernel + delta_i >= Nfft) break;
 			search_freq = fft_resolution * (double)(ikernel + delta_i);

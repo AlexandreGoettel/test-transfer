@@ -23,6 +23,7 @@
 #define DEFFMIN_FFT -1	/* lpsd.c	- default minimum frequency to get FFT output at, -1 for fmin */
 #define DEFFMAX_FFT -1	/* lpsd.c	- default maximum frequency to get FFT output at, -1 for fmax */
 #define DEFEPSILON 10 	/* lpsd.c	- default value for epsilon approximation level in percent */
+#define DEFCONSTQRELTHRESHOLD 1e-3	/* lpsd.c - default value for relative threshold in const. Q approximation */
 #define DEFMAXMEM -1		/* lpsd.c	- n for 2^n maximum values in memory */
 #define DEFDESAVG 100		/* desired number of averages */
 #define DEFMINAVG 10		/* minimum number of averages */
@@ -84,6 +85,7 @@ typedef struct {
 	int iter;			/* A reference number to show why step through a parallelised job. Set to zero for a single job run */
 	unsigned int Jdes;			/* Provides the total number of required frequencies */
 	double epsilon;		/* FFT approx level in percent */
+	double constQ_rel_threshold;  /* relative threshold for const. Q approximation */
 	unsigned short int asknspec;
 	double fsamp;			/* sampling frequency */
 	unsigned short int askfsamp;
