@@ -529,7 +529,7 @@ win_HFT248D (double z)
 }
 
 static int win_no = -2;
-static double win_alpha;
+static double win_alpha, win_alpha_sqr;
 
 void
 set_window (int type, double req_psll, char *name, double *psll, double *rov,
@@ -581,6 +581,7 @@ set_window (int type, double req_psll, char *name, double *psll, double *rov,
 	  if (req_psll < 25 || req_psll > 250)
 	gerror ("Kaiser window requested PSLL outside range 25..250");
 	  win_alpha = kaiser_alpha (req_psll);
+	  win_alpha_sqr = win_alpha * win_alpha;
 	  sprintf (name, "Kaiser %.3f", win_alpha);
 	  *psll = req_psll;
 	  *rov = kaiser_rov (win_alpha);
@@ -596,15 +597,20 @@ set_window (int type, double req_psll, char *name, double *psll, double *rov,
 
 //@brief Analytical implementation of spectral Kernel with Kaiser window
 double
-get_kernel(double freq, double fsamp, double m_over_Lj, double N)
+get_kernel(double iFreq, double theta, double phi)
 {
-	double kaiser_scal = netlibi0 (M_PI * win_alpha);
-	double shifted_freq = freq / fsamp - m_over_Lj;
-//	printf("freq, shifted_freq, Lj, alpha: %e, %e, %f, %f\n", freq, shifted_freq, N, win_alpha);
-	double _sqrt_term = pow(M_PI * N * shifted_freq, 2) - pow(M_PI * win_alpha, 2);
-	double output = _sqrt_term < 0 ? sinh(sqrt(-_sqrt_term)) / sqrt(-_sqrt_term)
-								   : sin(sqrt(_sqrt_term)) / sqrt(_sqrt_term);
-	return output / kaiser_scal;
+	double shifted_freq = iFreq*theta - phi;
+	double sqrt_term = shifted_freq*shifted_freq - win_alpha_sqr;
+
+	double output;
+	if (sqrt_term < 0) {
+		sqrt_term = M_PI * sqrt(-sqrt_term);
+		output = sinh(sqrt_term) / sqrt_term;
+	} else {
+		sqrt_term = M_PI * sqrt(sqrt_term);
+		output = sin(sqrt_term) / sqrt_term;
+	}
+	return output;
 }
 
 // @brief Wrapper for makewinsincos_indexed
@@ -696,11 +702,10 @@ makewin_indexed (unsigned long int nfft, unsigned long int offset, unsigned int 
 	gerror ("set_window has not been called.");
   if (win_no == -1)  /* Kaiser */
   {
-	double kaiser_scal = netlibi0 (M_PI * win_alpha);
 	for (j = offset; j < offset + count; j++)
 	{
 	  z = (double) j * factor - 1.;
-	  winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
+	  winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z));;
 
 	  *winsum += winval;
 	  *winsum2 += winval * winval;

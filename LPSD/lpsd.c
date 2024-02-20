@@ -407,24 +407,27 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		if (tmp == nread) n_segments--;
 
 		// Initialise segment loop vars
-		double m_over_Lj = (double) m / (double) Lj;
+		double shifted_m = (double) m * (Lj - 1) / (double) Lj;
+		double kernel_norm = (Lj - 1) / (double)Nfft;
 		// Get position in FFT bin freq
-		double search_freq = cfg->fsamp * m_over_Lj;  // Position of spectral peak in Hz
-		double ref_kernel = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
-		double kernel_val = ref_kernel;
+		double search_freq = cfg->fsamp * m / (double)Lj;  // Position of spectral peak in Hz
 		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
 		unsigned long int ikernel = round(search_freq / fft_resolution);
+		double ref_kernel = get_kernel(ikernel, kernel_norm, shifted_m);
+		double kernel_val = ref_kernel;
 
 		// Get delta_i
 		unsigned long int delta_i = 0;
-		while (kernel_val > ref_kernel * cfg->constQ_rel_threshold) {
+		int max_buffered_kernel_values = 500;
+		double kernel_values[max_buffered_kernel_values];
+		kernel_values[0] = get_kernel((double)ikernel, kernel_norm, shifted_m);
+
+		while (fabs(kernel_val) > ref_kernel * cfg->constQ_rel_threshold) {
 			delta_i++;
 			if (ikernel + delta_i >= Nfft) break;
-			search_freq = fft_resolution * (double)(ikernel + delta_i);
-			kernel_val = get_kernel(search_freq, cfg->fsamp, m_over_Lj, Lj - 1);
+			kernel_val = get_kernel(ikernel + delta_i, kernel_norm, shifted_m);
+			if (delta_i < max_buffered_kernel_values) kernel_values[delta_i] = kernel_val;
 		}
-		unsigned long int start_i = ikernel - (delta_i - 1) < 1 ? 1 : ikernel - (delta_i - 1);
-		unsigned long int end_i = ikernel + delta_i;
 
 		// Loop over segments
 		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
@@ -432,19 +435,34 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			// Sum over +- delta_i & normalise
 			segment_real = 0;
 			segment_imag = 0;
-			for (unsigned long int i = start_i; i < end_i; i++) {
+			for (unsigned long int _delta_i = 0; _delta_i <= delta_i; _delta_i++) {
 				// Adjust data location by multiplying exp's to the spectral terms
-//				exp_factor = -2*M_PI*(double)i/(double)Nfft*(double)(k*delta_segment);
-				exp_factor = -2*M_PI*(double)i/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+				unsigned long int i_fft = ikernel + _delta_i;
+				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
 
-				fft_freq = cfg->fsamp / Nfft * i;
-				kernel_val = get_kernel(fft_freq, cfg->fsamp, m_over_Lj, Lj - 1);
-				sign = i % 2 ? -1 : +1;
+				if (_delta_i >= max_buffered_kernel_values)
+					get_kernel(i_fft, kernel_norm, shifted_m);
+				else
+					kernel_val = kernel_values[_delta_i];
+				sign = i_fft % 2 ? -1 : +1;
 
-				segment_real += kernel_val*sign * (fft_real[i]*shift_real - fft_imag[i]*shift_imag);
-				segment_imag += kernel_val*sign * (fft_real[i]*shift_imag + fft_imag[i]*shift_real);
+				// Complex multiplication
+				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
+				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
+
+				// Now the other side
+				if (_delta_i == 0 || ikernel - _delta_i < 1) continue;
+				i_fft = ikernel - _delta_i;
+				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+				shift_real = cos(exp_factor);
+				shift_imag = sin(exp_factor);
+
+				// I have to re-calculate the kernel_val here because the rounding of the indices makes the kernel slightly asymmetric
+				kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
+				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
+				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
 			}
 			total += (segment_real*segment_real + segment_imag*segment_imag);
 		}
