@@ -348,30 +348,35 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
 void
 calculate_constQ_approx (tCFG *cfg, tDATA *data)
 {
-	// Track time and progress
-    struct timeval tv;
-    printf("Computing output:  00.0%%");
-    fflush(stdout);
-    gettimeofday(&tv, NULL);
-    double start = tv.tv_sec + tv.tv_usec / 1e6;
-    double now, print, progress;
-    print = now = start;
-
 	// Prepare data file
 	struct hdf5_contents contents;
 	read_hdf5_file(&contents, (*cfg).ifn, (*cfg).dataset_name);
 
 	// ###### START ANALYSIS ###### //
-	// Get Nj0 and other vars, but with m as integer
 	double g = log(cfg->fmax / cfg->fmin);
-	int m = round(1. / (exp(g / (cfg->Jdes - 1.)) - 1.));
+	int m = round(1. / (exp(g / (cfg->Jdes - 1.)) - 1.));  // m as an integer!
+	unsigned int max_samples_in_memory = pow(2, cfg->n_max_mem);
+	// Make sure Nj0 is even
 	unsigned long int Nj0 = round(cfg->fsamp*m/cfg->fmin);
-	// Make sure Nj0 is even (tmp?)
 	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
 
 	// Calculate window normalisation proportionality constant
-	double *window = (double*) xmalloc(Nj0 * sizeof(double));
-	makewin(Nj0, window, &winsum, &winsum2, &nenbw);
+	printf("Calculating window normalisation constant..\n");
+	double *window = (double*) xmalloc(max_samples_in_memory * sizeof(double));
+	unsigned long int remaining_samples = Nj0;
+	unsigned int memory_unit_index = 0;
+	unsigned int iteration_samples;
+
+	// Calculate window
+	while (remaining_samples > 0) {
+		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
+		else iteration_samples = remaining_samples;
+		makewin_indexed(Nj0, memory_unit_index*max_samples_in_memory, iteration_samples, window,
+		                &winsum, &winsum2, &nenbw, memory_unit_index == 0);
+		// Book-keeping
+		remaining_samples -= iteration_samples;
+		memory_unit_index++;
+	}
 	xfree(window);
 	double norm_propto_factor = winsum2 / (double) Nj0;
 
@@ -394,7 +399,16 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
 	FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
 
-	// Loop over frequencies
+	// Track time and progress
+    struct timeval tv;
+    printf("Computing output:  00.0%%");
+    fflush(stdout);
+    gettimeofday(&tv, NULL);
+    double start = tv.tv_sec + tv.tv_usec / 1e6;
+    double now, print, progress;
+    print = now = start;
+
+    // Loop over frequencies
 	for (int j = 0; j < cfg->Jdes; j++) {
 		// Prepare segment loop parameters
 		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
