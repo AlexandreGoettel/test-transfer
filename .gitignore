@@ -4,3 +4,4 @@
 shared_git_data/*
 test*
 tmp*
+*/__pycache__/*
