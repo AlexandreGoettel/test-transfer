@@ -343,172 +343,6 @@ calculate_lpsd (tCFG * cfg, tDATA * data)
   printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 }
 
-// @brief Use constant Q approximation
-// @brief This will only work when using the Kaiser window.
-void
-calculate_constQ_approx (tCFG *cfg, tDATA *data)
-{
-	// Prepare data file
-	struct hdf5_contents contents;
-	read_hdf5_file(&contents, (*cfg).ifn, (*cfg).dataset_name);
-
-	// ###### START ANALYSIS ###### //
-	double g = log(cfg->fmax / cfg->fmin);
-	int m = round(1. / (exp(g / (cfg->Jdes - 1.)) - 1.));  // m as an integer!
-	unsigned int max_samples_in_memory = pow(2, cfg->n_max_mem);
-	// Make sure Nj0 is even
-	unsigned long int Nj0 = round(cfg->fsamp*m/cfg->fmin);
-	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
-
-	// Calculate window normalisation proportionality constant
-	printf("Calculating window normalisation constant..\n");
-	double *window = (double*) xmalloc(max_samples_in_memory * sizeof(double));
-	unsigned long int remaining_samples = Nj0;
-	unsigned int memory_unit_index = 0;
-	unsigned int iteration_samples;
-
-	// Calculate window
-	while (remaining_samples > 0) {
-		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
-		else iteration_samples = remaining_samples;
-		makewin_indexed(Nj0, memory_unit_index*max_samples_in_memory, iteration_samples, window,
-		                &winsum, &winsum2, &nenbw, memory_unit_index == 0);
-		// Book-keeping
-		remaining_samples -= iteration_samples;
-		memory_unit_index++;
-	}
-	xfree(window);
-	double norm_propto_factor = winsum2 / (double) Nj0;
-
-	// FFT over the (whole!) data
-	unsigned long int Nfft = get_next_power_of_two(nread);
-	// TODO: memory management for big-data scenarios
-	double *data_real, *data_imag, *fft_real, *fft_imag;
-	data_real = (double*) xmalloc(Nfft * sizeof(double));
-	data_imag = (double*) xmalloc(Nfft * sizeof(double));
-	fft_real = (double*) xmalloc(Nfft * sizeof(double));
-	fft_imag = (double*) xmalloc(Nfft * sizeof(double));
-	memset(data_imag, 0, Nfft * sizeof(double));
-	for (int i = nread; i < Nfft; i++) data_real[i] = 0;
-
-	// Read and FFT data
-	hsize_t offset[1] = {0};
-	hsize_t count[1] = {nread-1};
-	hsize_t data_rank = 1;
-	hsize_t data_count[1] = {count[0]};
-	read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
-	FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
-
-	// Track time and progress
-    struct timeval tv;
-    printf("Computing output:  00.0%%");
-    fflush(stdout);
-    gettimeofday(&tv, NULL);
-    double start = tv.tv_sec + tv.tv_usec / 1e6;
-    double now, print, progress;
-    print = now = start;
-
-    // Loop over frequencies
-	for (int j = 0; j < cfg->Jdes; j++) {
-		// Prepare segment loop parameters
-		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
-		// Make sure Lj is even (tmp?)
-		Lj = (Lj % 2) ? Lj - 1 : Lj;
-		unsigned long int delta_segment = floor(Lj * (1.0 - (double) (cfg->ovlp / 100.)));
-		unsigned int n_segments = floor(1 + (nread - Lj) / delta_segment);
-		/* Adjust for edge case */
-		long int tmp = (n_segments - 1)*delta_segment + Lj;
-		if (tmp == nread) n_segments--;
-
-		// Initialise segment loop vars
-		double shifted_m = (double) m * (Lj - 1) / (double) Lj;
-		double kernel_norm = (Lj - 1) / (double)Nfft;
-		// Get position in FFT bin freq
-		double search_freq = cfg->fsamp * m / (double)Lj;  // Position of spectral peak in Hz
-		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
-		unsigned long int ikernel = round(search_freq / fft_resolution);
-		double ref_kernel = get_kernel(ikernel, kernel_norm, shifted_m);
-		double kernel_val = ref_kernel;
-
-		// Get delta_i
-		unsigned long int delta_i = 0;
-		int max_buffered_kernel_values = 500;
-		double kernel_values[max_buffered_kernel_values];
-		kernel_values[0] = get_kernel((double)ikernel, kernel_norm, shifted_m);
-
-		while (fabs(kernel_val) > ref_kernel * cfg->constQ_rel_threshold) {
-			delta_i++;
-			if (ikernel + delta_i >= Nfft) break;
-			kernel_val = get_kernel(ikernel + delta_i, kernel_norm, shifted_m);
-			if (delta_i < max_buffered_kernel_values) kernel_values[delta_i] = kernel_val;
-		}
-
-		// Loop over segments
-		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
-		for (int k = 0; k < n_segments; k++) {
-			// Sum over +- delta_i & normalise
-			segment_real = 0;
-			segment_imag = 0;
-			for (unsigned long int _delta_i = 0; _delta_i <= delta_i; _delta_i++) {
-				// Adjust data location by multiplying exp's to the spectral terms
-				unsigned long int i_fft = ikernel + _delta_i;
-				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
-				shift_real = cos(exp_factor);
-				shift_imag = sin(exp_factor);
-
-				if (_delta_i >= max_buffered_kernel_values)
-					get_kernel(i_fft, kernel_norm, shifted_m);
-				else
-					kernel_val = kernel_values[_delta_i];
-				sign = i_fft % 2 ? -1 : +1;
-
-				// Complex multiplication
-				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
-				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
-
-				// Now the other side
-				if (_delta_i == 0 || ikernel - _delta_i < 1) continue;
-				i_fft = ikernel - _delta_i;
-				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
-				shift_real = cos(exp_factor);
-				shift_imag = sin(exp_factor);
-
-				// I have to re-calculate the kernel_val here because the rounding of the indices makes the kernel slightly asymmetric
-				kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
-				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
-				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
-			}
-			total += (segment_real*segment_real + segment_imag*segment_imag);
-		}
-		total *= pow((double) Lj / (double) Nfft, 2);
-
-		// - Fill data arrays
-		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
-		data->psd[j] = total * norm_psd;
-		data->avg[j] = n_segments;
-
-		// Progress tracking
-		if (j % 100 == 0) {
-			progress = 100. * (double) j / cfg->Jdes;
-			printf ("\b\b\b\b\b\b%5.1f%%", progress);
-			fflush (stdout);
-        }
-	}
-
-	// Clean-up
-	xfree(data_real);
-	xfree(data_imag);
-	xfree(fft_real);
-	xfree(fft_imag);
-
-	// Finish
-    close_hdf5_contents(&contents);
-    printf ("\b\b\b\b\b\b  100%%\n");
-    fflush (stdout);
-    gettimeofday (&tv, NULL);
-    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
-}
-
 // @brief Use const. N approximation for a given epsilon
 void
 calculate_fft_approx (tCFG * cfg, tDATA * data)
@@ -744,6 +578,172 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
     printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
 }
 
+// @brief Use constant Q approximation
+// @brief This will only work when using the Kaiser window.
+void
+calculate_constQ_approx (tCFG *cfg, tDATA *data)
+{
+	// Prepare data file
+	struct hdf5_contents contents;
+	read_hdf5_file(&contents, (*cfg).ifn, (*cfg).dataset_name);
+
+	// ###### START ANALYSIS ###### //
+	double g = log(cfg->fmax / cfg->fmin);
+	int m = round(1. / (exp(g / (cfg->Jdes - 1.)) - 1.));  // m as an integer!
+	unsigned int max_samples_in_memory = pow(2, cfg->n_max_mem);
+	// Make sure Nj0 is even
+	unsigned long int Nj0 = round(cfg->fsamp*m/cfg->fmin);
+	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
+
+	// Calculate window normalisation proportionality constant
+	printf("Calculating window normalisation constant..\n");
+	double *window = (double*) xmalloc(max_samples_in_memory * sizeof(double));
+	unsigned long int remaining_samples = Nj0;
+	unsigned int memory_unit_index = 0;
+	unsigned int iteration_samples;
+
+	// Calculate window
+	while (remaining_samples > 0) {
+		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
+		else iteration_samples = remaining_samples;
+		makewin_indexed(Nj0, memory_unit_index*max_samples_in_memory, iteration_samples, window,
+		                &winsum, &winsum2, &nenbw, memory_unit_index == 0);
+		// Book-keeping
+		remaining_samples -= iteration_samples;
+		memory_unit_index++;
+	}
+	xfree(window);
+	double norm_propto_factor = winsum2 / (double) Nj0;
+
+	// FFT over the (whole!) data
+	unsigned long int Nfft = get_next_power_of_two(nread);
+	// TODO: memory management for big-data scenarios
+	double *data_real, *data_imag, *fft_real, *fft_imag;
+	data_real = (double*) xmalloc(Nfft * sizeof(double));
+	data_imag = (double*) xmalloc(Nfft * sizeof(double));
+	fft_real = (double*) xmalloc(Nfft * sizeof(double));
+	fft_imag = (double*) xmalloc(Nfft * sizeof(double));
+	memset(data_imag, 0, Nfft * sizeof(double));
+	for (int i = nread; i < Nfft; i++) data_real[i] = 0;
+
+	// Read and FFT data
+	hsize_t offset[1] = {0};
+	hsize_t count[1] = {nread-1};
+	hsize_t data_rank = 1;
+	hsize_t data_count[1] = {count[0]};
+	read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
+	FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
+
+	// Track time and progress
+    struct timeval tv;
+    printf("Computing output:  00.0%%");
+    fflush(stdout);
+    gettimeofday(&tv, NULL);
+    double start = tv.tv_sec + tv.tv_usec / 1e6;
+    double now, print, progress;
+    print = now = start;
+
+    // Loop over frequencies
+	for (int j = 0; j < cfg->Jdes; j++) {
+		// Prepare segment loop parameters
+		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
+		// Make sure Lj is even (tmp?)
+		Lj = (Lj % 2) ? Lj - 1 : Lj;
+		unsigned long int delta_segment = floor(Lj * (1.0 - (double) (cfg->ovlp / 100.)));
+		unsigned int n_segments = floor(1 + (nread - Lj) / delta_segment);
+		/* Adjust for edge case */
+		long int tmp = (n_segments - 1)*delta_segment + Lj;
+		if (tmp == nread) n_segments--;
+
+		// Initialise segment loop vars
+		double shifted_m = (double) m * (Lj - 1) / (double) Lj;
+		double kernel_norm = (Lj - 1) / (double)Nfft;
+		// Get position in FFT bin freq
+		double search_freq = cfg->fsamp * m / (double)Lj;  // Position of spectral peak in Hz
+		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
+		unsigned long int ikernel = round(search_freq / fft_resolution);
+		double ref_kernel = get_kernel(ikernel, kernel_norm, shifted_m);
+		double kernel_val = ref_kernel;
+
+		// Get delta_i
+		unsigned long int delta_i = 0;
+		int max_buffered_kernel_values = 500;
+		double kernel_values[max_buffered_kernel_values];
+		kernel_values[0] = get_kernel((double)ikernel, kernel_norm, shifted_m);
+
+		while (fabs(kernel_val) > ref_kernel * cfg->constQ_rel_threshold) {
+			delta_i++;
+			if (ikernel + delta_i >= Nfft) break;
+			kernel_val = get_kernel(ikernel + delta_i, kernel_norm, shifted_m);
+			if (delta_i < max_buffered_kernel_values) kernel_values[delta_i] = kernel_val;
+		}
+
+		// Loop over segments
+		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
+		for (int k = 0; k < n_segments; k++) {
+			// Sum over +- delta_i & normalise
+			segment_real = 0;
+			segment_imag = 0;
+			for (unsigned long int _delta_i = 0; _delta_i <= delta_i; _delta_i++) {
+				// Adjust data location by multiplying exp's to the spectral terms
+				unsigned long int i_fft = ikernel + _delta_i;
+				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+				shift_real = cos(exp_factor);
+				shift_imag = sin(exp_factor);
+
+				if (_delta_i >= max_buffered_kernel_values)
+					get_kernel(i_fft, kernel_norm, shifted_m);
+				else
+					kernel_val = kernel_values[_delta_i];
+				sign = i_fft % 2 ? -1 : +1;
+
+				// Complex multiplication
+				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
+				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
+
+				// Now the other side
+				if (_delta_i == 0 || ikernel - _delta_i < 1) continue;
+				i_fft = ikernel - _delta_i;
+				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+				shift_real = cos(exp_factor);
+				shift_imag = sin(exp_factor);
+
+				// I have to re-calculate the kernel_val here because the rounding of the indices makes the kernel slightly asymmetric
+				kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
+				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
+				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
+			}
+			total += (segment_real*segment_real + segment_imag*segment_imag);
+		}
+		total *= pow((double) Lj / (double) Nfft, 2);
+
+		// - Fill data arrays
+		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
+		data->psd[j] = total * norm_psd;
+		data->avg[j] = n_segments;
+
+		// Progress tracking
+		if (j % 100 == 0) {
+			progress = 100. * (double) j / cfg->Jdes;
+			printf ("\b\b\b\b\b\b%5.1f%%", progress);
+			fflush (stdout);
+        }
+	}
+
+	// Clean-up
+	xfree(data_real);
+	xfree(data_imag);
+	xfree(fft_real);
+	xfree(fft_imag);
+
+	// Finish
+    close_hdf5_contents(&contents);
+    printf ("\b\b\b\b\b\b  100%%\n");
+    fflush (stdout);
+    gettimeofday (&tv, NULL);
+    printf ("Duration (s)=%5.3f\n\n", tv.tv_sec - start + tv.tv_usec / 1e6);
+}
+
 /*
     works on cfg, data structures of the calling program
 */
@@ -766,8 +766,7 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
 
   calc_params (cfg, data);
   if ((*cfg).METHOD == 0) calculate_lpsd(cfg, data);
-//  else if ((*cfg).METHOD == 1) calculate_fft_approx(cfg, data);
-  else if ((*cfg).METHOD == 1) calculate_constQ_approx(cfg, data);
+  else if ((*cfg).METHOD == 1) calculate_fft_approx(cfg, data);
+  else if ((*cfg).METHOD == 2) calculate_constQ_approx(cfg, data);
   else gerror("Method not implemented.");
 }
-
