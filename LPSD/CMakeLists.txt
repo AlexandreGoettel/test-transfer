@@ -11,9 +11,12 @@ message(STATUS "HDF5 INCLUDE DIR: " ${HDF5_INCLUDE_DIRS})
 include_directories(${HDF5_INCLUDE_DIRS})
 
 # Add FFTW3
-find_package(PkgConfig REQUIRED)
-pkg_search_module(FFTW REQUIRED fftw3 IMPORTED_TARGET)
-include_directories(PkgConfig::FFTW)
+#find_package(PkgConfig REQUIRED)
+#pkg_search_module(FFTW REQUIRED fftw3 IMPORTED_TARGET)
+#include_directories(PkgConfig::FFTW)
+
+# Add GSL
+find_package(GSL REQUIRED)
 
 # Set variables
 SET(EXENAME "lpsd-exec")
@@ -32,8 +35,8 @@ SET(SOURCE
 	${SRCPATH}/ArgParser.c
 	${SRCPATH}/StrParser.c
 	${SRCPATH}/netlibi0.c
-	${SRCPATH}/goodn.c
 	${SRCPATH}/ask.c
+	${SRCPATH}/fft.c
 )
 SET(HEADERS
 	${INCLUDEPATH}/IO.h
@@ -48,15 +51,15 @@ SET(HEADERS
 	${INCLUDEPATH}/ArgParser.h
 	${INCLUDEPATH}/StrParser.h
 	${INCLUDEPATH}/netlibi0.h
-	${INCLUDEPATH}/goodn.h
 	${INCLUDEPATH}/ask.h
+	${INCLUDEPATH}/fft.h
 )
 
 # Set executable(s)
 add_executable(${EXENAME} ${SOURCE} ${HEADERS})
 
 # Link & install
-target_link_libraries(${EXENAME} PRIVATE HDF5::HDF5 PkgConfig::FFTW)
+target_link_libraries(${EXENAME} PRIVATE HDF5::HDF5 GSL::gsl GSL::gslcblas)# PkgConfig::FFTW)
 target_include_directories(${EXENAME} PRIVATE ${INCLUDEPATH})
 INSTALL(TARGETS ${EXENAME} DESTINATION bin)
 

@@ -37,6 +37,7 @@ void asks (char *text, char *data) {
 	if (input[0] != '\0') strcpy (data, input);
 }
 
+//  @brief Prompt the user for an int input
 void aski (char *text, int *data) {
 	int temp;
 	char input[DOUBLEN];
@@ -50,10 +51,30 @@ void aski (char *text, int *data) {
 		if (input[l - 1] == '\n') input[l - 1] = '\0';
 		/* RETURN-Taste */
 		if (input[0] == '\0') ok = TRUE;
-		else if (sscanf (input, "%d", &temp) == 1) {
-			ok = TRUE;
-			*data = temp;
-		}
-	}
-	while (ok == FALSE);
+		else if (sscanf(input, "%d", &temp) == 1) {
+            *data = temp;
+            ok = TRUE;
+        }
+    } while (!ok);
+}
+
+// @brief Same as aski, but for long int default.
+void askil(char *text, long int *data) {
+    long int temp;
+    char input[DOUBLEN];
+    int ok = FALSE, l;
+
+    do {
+        printf("%s (%ld)? ", text, *data);
+        fgets (input, DOUBLEN - 1, stdin);
+        l = strlen(input);
+        /* remove newline */
+        if (input[l - 1] == '\n') input[l - 1] = '\0';
+		/* RETURN-Taste */
+        if (input[0] == '\0') ok = TRUE;
+        else if (sscanf(input, "%ld", &temp) == 1) {
+            *data = temp;
+            ok = TRUE;
+        }
+    } while (!ok);
 }

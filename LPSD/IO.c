@@ -6,7 +6,6 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
-#include "config.h"
 #include "misc.h"
 #include "errors.h"
 #include "tics.h"
