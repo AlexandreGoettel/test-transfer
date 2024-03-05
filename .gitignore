@@ -5,3 +5,6 @@ shared_git_data/*
 test*
 tmp*
 */__pycache__/*
+LPSD/CMakeFiles/*
+LPSD/Makefile
+LPSD/*.cmake
