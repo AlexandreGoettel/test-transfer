@@ -1,0 +1,53 @@
+#!/usr/bin/env sh
+
+# Declare data file, must be hdf5 file
+filename=$input_file
+dataset=$channel
+
+# Declare number of seconds data in file
+TSlength=$data_length
+
+# Declare start and end frequencies
+f_min=$fmin
+f_max=$fmax
+
+# Declare 'Jdes': The total number of required frequency bins
+Nfreqs_full=$Jdes
+
+# Epsilon for block approximation (in percent)
+block_eps=$epsilon
+
+# n for maximum array size 2^n
+n_memory=$max_memory_power
+
+# Declare the number of frequencies in each batch
+# If a single job is required:
+# Set iter=0 and n=${full}
+iter=0
+batch_size=${Nfreqs_full}
+
+# Declare the output file
+outfilename=$output_file
+
+$path_to_lpsd_exec \
+	-A 2 \
+	-b 0 \
+	-e ${TSlength} \
+	-f 16384 \
+	-h 1 \
+	-i ${filename}\
+    -D ${dataset}\
+	-l 20 \
+	-n ${batch_size} \
+	-o ${outfilename} \
+	-r 0 \
+	-s ${f_min} \
+	-t ${f_max} \
+	-T \
+	-w -2 \
+	-p 238.13 \
+	-x 1 \
+	-N ${iter} \
+	-J ${Nfreqs_full} \
+    -E ${block_eps} \
+	-M ${n_memory}

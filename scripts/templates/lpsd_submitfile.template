@@ -1,0 +1,14 @@
+Universe = vanilla
+Executable = $run_file
+
+request_cpus = $request_cpus
+accounting_group = $accounting_group
+accounting_group_user = $accounting_group_user
+request_disk = $request_disk_GB GB
+request_memory = $request_memory_GB GB
+
+Output = ${outdir}/lpsd.out
+Error = ${outdir}/lpsd.err
+Log = ${outdir}/lpsd.log
+
+Queue 1
