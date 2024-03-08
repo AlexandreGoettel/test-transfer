@@ -34,7 +34,7 @@ def parse_args():
                         help="Percentage of data to keep (assuming norm) during peak removal.")
     parser.add_argument("--chi-lo", type=float, default=.01,
                         help="Minimal accepted chi^2/dof value in skew norm fits.")
-    parser.add_argument("--chi-hi", type=float, default=.2,
+    parser.add_argument("--chi-hi", type=float, default=2,
                         help="Maximal accepted chi^2/dof value in skew norm fits.")
     parser.add_argument("--bin-factor", type=float, default=.01,
                         help="Inverse bin width in bin units for skew norm fits.")
