@@ -64,6 +64,7 @@ def write_template(args, infile, outfile):
     with open(outfile, "w") as _f:
         _f.write(Template(contents).safe_substitute(args))
 
+
 def main(args):
     """
     Generates a LPSD run file and, optionally, condor submit file.
@@ -82,7 +83,8 @@ def main(args):
         args["fmax"] = args["fsample"] / 2
 
     if args["Jdes"] is None:
-        lpsd_args = LPSDVars(args["fmin"], args["fmax"], args["resolution"])
+        lpsd_args = LPSDVars(*map(lambda x: args[x],
+                                  ["fmin", "fmax", "resolution", "fsample", "epsilon"]))
         args["Jdes"] = lpsd_args.Jdes
 
     if args["data_length"] is None:
