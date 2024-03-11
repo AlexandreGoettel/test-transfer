@@ -244,15 +244,16 @@ class BlockCorrector:
             plt.show()
 
         # Perform chi^2 fit for an uncertainty estimate
-        X, Y = np.log(self.data.freq), self.data.logPSD
         def fitfunc(x, *args):
             y_spline = models.model_spline(args, x_knots, shift=0)(x)
-            y_lines = models.model_segment_slope(args, x, self.block_positions,
+            y_lines = models.model_segment_slope(args, x, block_positions,
                                                  shift=0+len(x_knots))
             return y_spline + y_lines
+
         _, pcov = curve_fit(fitfunc, X, Y, p0=bestfit[3:], absolute_sigma=False,
                             sigma=1e-4 + np.abs(bestfit[0]*X*X + bestfit[1]*X + bestfit[2]))
 
+        X, Y = np.log(self.data.freq), self.data.logPSD
         y_model = models.model_spline(bestfit, x_knots, shift=3)(X)
         y_model += models.model_segment_slope(bestfit, X, block_positions, shift=3+len(x_knots))
         return bestfit, np.sqrt(np.diag(pcov)), y_model
@@ -356,7 +357,7 @@ class BlockCorrector:
             # Whiten full data using _start and _end mapping
             mu, sigma, alpha = list(map(lambda f: f(i), interp_funcs))
             whitened_data[_start:_end] = norm.ppf(
-                stats.cdf_skewnorm(residuals[_start:_end], mu=mu, sigma=sigma, alpha=alpha)
+                stats.cdf_skewnorm(residuals[_start:_end], loc=mu, scale=sigma, alpha=alpha)
             )
             # Prepare plot
             plot_x.extend(self.data.freq[_start:_end])
@@ -481,8 +482,10 @@ def correct_blocks(data_path, verbose=False, recursion_threshold=1,
     # Save results
     Y_corrected = corrector.data.logPSD - models.model_segment_slope(
         new_bestfit, np.log(corrector.data.freq), corrector.block_positions, shift=3+len(x_knots))
+    # TODO: unify saving below? Might not be necessary
     with h5py.File(output_path, "w") as _f:
-        _f.create_dataset("logPSD", data=Y_corrected, dtype="float64")
+        dset = _f.create_dataset("logPSD", data=Y_corrected, dtype="float64")
+        dset.attrs.update(corrector.data.vars.__dict__)
         _f.create_dataset("frequency", data=data.freq, dtype="float64")
         _f.create_dataset("peak_mask", data=peak_mask, dtype="bool")
 
