@@ -40,8 +40,6 @@ def parse_args():
                         help="How long to wait for improvement before search ends.")
     parser.add_argument("--buffer", type=int, default=50,
                         help="Add frequency bins to add around segment (regularization)")
-    # parser.add_argument("--nbins", type=int, default=75,
-    #                     help="Number of bins for skew-normal fit.")
     parser.add_argument("--bin-scaling", type=float, default=.15,
                         help="Bin scaling factor for the skew-normal hist fit.")
     parser.add_argument("--pruning", type=int, default=1,
@@ -49,9 +47,8 @@ def parse_args():
     parser.add_argument("--n-processes", type=int, default=1,
                         help="Number of processes to use for multiprocessing of main loop.")
     parser.add_argument("--verbose", action="store_true")
-    # TODO
-    # parser.add_argument("--plot-path", type=str, default=None,
-    #                     help="If verbose, path to dir in which to save plots.")
+    parser.add_argument("--plot-path", type=str, default=None,
+                        help="If verbose, path to dir in which to save plots.")
     parser.add_argument("--kernel-size", type=int, default=10,
                         help="If verbose, smoothing kernel size in BIC plot.")
     parser.add_argument("--cfd-fraction", type=float, default=.1,
@@ -145,11 +142,19 @@ def calc_bic(x, y, n_knots, bin_scaling=.15, buffer=40, cfd_fraction=.1):
     def log_lkl(params):
         residuals = y[cfd_mask] - bkg_model(x[cfd_mask], params[3:])
         # lkl = stats.logpdf_skewnorm(residuals, *params[:3])  # would be faster
-        lkl = np.log(stats.pdf_skewnorm(residuals, 1, *params[:3]))
-        try:
-            lkl[np.isnan(lkl)] = min(lkl[~np.isnan(lkl)])
-        except ValueError:
-            return np.inf
+        # Safely calculate log pdf values
+        pdf = stats.pdf_skewnorm(residuals, 1, *params[:3])
+        lkl = np.full(pdf.shape, -np.inf, dtype=np.float64)
+        mask = pdf == 0
+        lkl[~mask] = np.log(pdf[~mask])
+
+        # Protect against NaNs
+        isnan = np.isnan(lkl)
+        if isnan.sum() > 0:
+            try:
+                lkl[isnan] = min(lkl[~isnan])
+            except ValueError:
+                return np.inf
         return -lkl.sum()
 
     p0 = np.concatenate([_popt[:3], popt.x])
@@ -209,26 +214,33 @@ def bayesian_regularized_linreg(
 def process_iteration(args):
     """Wrap BIC-minimising bkg. fit."""
     i, x, y, kwargs = args
-    kernel_size, plot_mean, verbose = list(map(kwargs.pop,
-                                               ["kernel_size", "plot_mean", "verbose"]))
+    kernel_size, plot_mean, verbose, plot_path = list(map(
+        kwargs.pop, ["kernel_size", "plot_mean", "verbose", "plot_path"]))
+    if verbose:
+        prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}]_Hz"
+        try:
+            plot_path = os.path.join(plot_path, f"{prefix}.png")
+        except TypeError as err:
+            print("[ERROR] You need to specify a plot_path if verbose is True.")
+            raise err
 
     y_model, func_popt, distr_popt = bayesian_regularized_linreg(
         x, y, calc_bic, bkg_model, **kwargs)
     # Catch fit errors
     if y_model is None:
         if verbose:
-            # prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
             plt.figure()
             plt.plot(x, y)
-            plt.figure()
-            plt.show()
+            plt.savefig(plot_path)
+            plt.close()
         return i, None, None, np.inf
 
     # Calculate chi-sqr of distr. fit through Poisson
     res = y - y_model
-    a, b = np.quantile(res, [0.05, 0.95])
+    a, b = np.quantile(res, [0.05, 0.95])  # Base binning on std, protect from outliers
     bin_width = kwargs["bin_scaling"] * np.std(res[(res > a) & (res < b)])
 
+    # Apply CFD
     bins = np.arange(min(res), max(res)+bin_width, bin_width)
     h0, bins = np.histogram(res, bins)
     bins = apply_cfd(h0, bins, kwargs["cfd_fraction"])
@@ -243,7 +255,7 @@ def process_iteration(args):
     # Save figure
     if verbose:
         gs = GridSpec(1, 4)
-        fig = plt.figure(figsize=(16, 9))
+        fig = plt.figure(figsize=(8, 4.5))
         axData, axHist = fig.add_subplot(gs[:3]), fig.add_subplot(gs[-1])
 
         axData.plot(x, y, ".", label="Data", zorder=1)
@@ -259,7 +271,9 @@ def process_iteration(args):
         axHist.plot(bin_centers, residuals_fit)
         axHist.set_xlabel("Residuals (logPSD)")
         axHist.set_title(r"Skew-normal $\chi^2/dof$: " + f"{chi_sqr / (np.sum(pos_h0) - 3):.1f}")
-        plt.show()
+
+        plt.savefig(plot_path)
+        plt.close()
 
     return i, func_popt, distr_popt, chi_sqr / (np.sum(pos_h0) - 3)
 
