@@ -8,6 +8,7 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.gridspec import GridSpec
 from scipy.optimize import minimize
 # Project imports
 from LPSDIO import LPSDOutput
@@ -39,8 +40,10 @@ def parse_args():
                         help="How long to wait for improvement before search ends.")
     parser.add_argument("--buffer", type=int, default=50,
                         help="Add frequency bins to add around segment (regularization)")
-    parser.add_argument("--nbins", type=int, default=75,
-                        help="Number of bins for skew-normal fit.")
+    # parser.add_argument("--nbins", type=int, default=75,
+    #                     help="Number of bins for skew-normal fit.")
+    parser.add_argument("--bin-scaling", type=float, default=.15,
+                        help="Bin scaling factor for the skew-normal hist fit.")
     parser.add_argument("--pruning", type=int, default=1,
                         help="Prune data for speed-up.")
     parser.add_argument("--n-processes", type=int, default=1,
@@ -51,8 +54,28 @@ def parse_args():
     #                     help="If verbose, path to dir in which to save plots.")
     parser.add_argument("--kernel-size", type=int, default=10,
                         help="If verbose, smoothing kernel size in BIC plot.")
+    parser.add_argument("--cfd-fraction", type=float, default=.1,
+                        help="Regularize fits given outliers.")
 
     return vars(parser.parse_args())
+
+
+def apply_cfd(h0, bins, _cfd):
+    """Apply rising and falling edge constant fraction discriminator."""
+    peak_index = np.argmax(h0)
+    rising_idx_col = np.where(h0[:peak_index] >= h0[peak_index] * _cfd)[0]
+    if not list(rising_idx_col):
+        rising_idx = 0
+    else:
+        rising_idx = rising_idx_col[0]
+
+    falling_idx_col = np.where(h0[peak_index:] < h0[peak_index] * _cfd)[0]
+    if not list(falling_idx_col) or falling_idx_col[0] > len(h0) -2:
+        falling_idx = len(h0) - 2
+    else:
+        falling_idx = falling_idx_col[0] + peak_index
+
+    return np.linspace(bins[rising_idx], bins[falling_idx+1], len(bins))
 
 
 def bkg_model(x, knots):
@@ -60,7 +83,7 @@ def bkg_model(x, knots):
     return models.model_xy_spline(knots, extrapolate=True)(x)
 
 
-def calc_bic(x, y, n_knots, verbose=False, nbins=100, buffer=40):
+def calc_bic(x, y, n_knots, bin_scaling=.15, buffer=40, cfd_fraction=.1):
     """
     Fit the background while optimising BIC.
 
@@ -103,15 +126,24 @@ def calc_bic(x, y, n_knots, verbose=False, nbins=100, buffer=40):
         return stats.pdf_skewnorm(_x, params[3], alpha=params[2],
                                     loc=params[0], scale=params[1])
 
-    h0, bins = np.histogram(res, nbins)
+    a, b = np.quantile(res, [0.05, 0.95])
+    bin_width = bin_scaling * np.std(res[(res > a) & (res < b)])  # EMPIRICAL
+
+    bins = np.arange(min(res), max(res)+bin_width, bin_width)
+    h0, bins = np.histogram(res, bins)
+    # 6.1 Use CFD to regularize in the face of outliers
+    bins = apply_cfd(h0, bins, cfd_fraction)
+    bins = np.arange(bins[0], bins[-1]+bin_width, bin_width)
+    cfd_mask = (res >= bins[0]) & (res <= bins[-1])
+
     try:
         _popt, _ = hist.fit_hist(fitFunc, res, bins, [mu, sigma, alpha, max(h0)])
-    except RuntimeError as err:
+    except RuntimeError:
         return -np.inf, popt.x, [alpha, mu, sigma]
 
     # 7. Use all previous info as starting params for full lkl fit.
     def log_lkl(params):
-        residuals = y - bkg_model(x, params[3:])
+        residuals = y[cfd_mask] - bkg_model(x[cfd_mask], params[3:])
         # lkl = stats.logpdf_skewnorm(residuals, *params[:3])  # would be faster
         lkl = np.log(stats.pdf_skewnorm(residuals, 1, *params[:3]))
         try:
@@ -123,33 +155,12 @@ def calc_bic(x, y, n_knots, verbose=False, nbins=100, buffer=40):
     p0 = np.concatenate([_popt[:3], popt.x])
     bounds = [[v - 0.1*abs(v), v + 0.1*abs(v)] for v in p0[:3]] + bounds
     total_popt = minimize(log_lkl, p0, method="Nelder-Mead", bounds=bounds)
-    # Debugging
-    #
-    # y_model = bkg_model(x, total_popt.x[3:])
-    # res = y - y_model
-    # bins = np.linspace(min(res), max(res), nbins)
-    # norm, pcov, chi = hist.fit_hist(tmp, res, bins, _popt[3], get_chi_sqr=True)
-    # print("MHHH", norm, pcov)
-    # axes = hist.plot_func_hist(tmp, norm, res, bins)
-    # axes[0].set_title(f"chi^2/dof: {chi:.1f}")
 
     # 7. Calculate BIC :-)
-    y_model = bkg_model(x, total_popt.x[3:])
-    res = y - y_model
+    y_model = bkg_model(x[cfd_mask], total_popt.x[3:])
+    res = y[cfd_mask] - y_model
     _lkl = stats.pdf_skewnorm(res, 1, *total_popt.x[:3])  # loc, scale, alpha
     bic = _lkl.sum() - 0.5 * (2*len(x_knots) + 4) * np.log(len(x))
-
-    if verbose:
-        plt.plot(x, y, zorder=1)
-        plt.plot(x, y_model, zorder=2)
-        plt.scatter(total_popt.x[3:3+n_knots], total_popt.x[3+n_knots:], color="r", zorder=3)
-        def tmp(_x, A):
-            return A*stats.pdf_skewnorm(_x, A, *total_popt.x[:3])
-        bins = np.linspace(min(res), max(res), nbins)
-        tmp_popt, _, chi = hist.fit_hist(tmp, res, bins, [_popt[0]], get_chi_sqr=True)
-        axes = hist.plot_func_hist(tmp, tmp_popt, res, bins)
-        axes[0].set_title(f"chi: {chi:.1f}, BIC: {bic:.1e}")
-        plt.show()
 
     # assert total_popt.success
     return bic, total_popt.x[3:], total_popt.x[:3]
@@ -157,7 +168,7 @@ def calc_bic(x, y, n_knots, verbose=False, nbins=100, buffer=40):
 
 def bayesian_regularized_linreg(
     x, y, get_bic, f_fit, k_min=4, k_pruning=1, k_plateau=2,
-        plot_mean=False, kernel_size=10, disable_tqdm=False, verbose=False, **bic_kwargs):
+        disable_tqdm=False, **bic_kwargs):
     """Fit polynomials for different degrees and select the one with the highest BIC."""
     # Loop over k
     orders, bics = [], []
@@ -192,36 +203,72 @@ def bayesian_regularized_linreg(
 
     if best_f_popt is None:
         return None, None, None
-    best_fit = f_fit(x, best_f_popt)
-    if verbose:
-        # Plot results
-        plt.plot(x, y, ".", label="Data", zorder=1)
-        plt.plot(x, best_fit, linewidth=2.,
-                 label=f"Best fit (k: {orders[np.argmax(bics)]})", zorder=3)
-        if plot_mean:
-            plt.plot(x, stats.kde_smoothing(y, kernel_size), label="kde", zorder=2)
-        plt.legend(loc="best")
-        plt.show()
-        # TODO: savefig
-
-    return best_fit, best_f_popt, best_distr_popt
+    return f_fit(x, best_f_popt), best_f_popt, best_distr_popt
 
 
 def process_iteration(args):
     """Wrap BIC-minimising bkg. fit."""
     i, x, y, kwargs = args
+    kernel_size, plot_mean, verbose = list(map(kwargs.pop,
+                                               ["kernel_size", "plot_mean", "verbose"]))
+
     y_model, func_popt, distr_popt = bayesian_regularized_linreg(
         x, y, calc_bic, bkg_model, **kwargs)
-    # TODO: Calculate chi_sqr?
-    return i, func_popt, distr_popt
+    # Catch fit errors
+    if y_model is None:
+        if verbose:
+            # prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}] Hz"
+            plt.figure()
+            plt.plot(x, y)
+            plt.figure()
+            plt.show()
+        return i, None, None, np.inf
+
+    # Calculate chi-sqr of distr. fit through Poisson
+    res = y - y_model
+    a, b = np.quantile(res, [0.05, 0.95])
+    bin_width = kwargs["bin_scaling"] * np.std(res[(res > a) & (res < b)])
+
+    bins = np.arange(min(res), max(res)+bin_width, bin_width)
+    h0, bins = np.histogram(res, bins)
+    bins = apply_cfd(h0, bins, kwargs["cfd_fraction"])
+    h0, bins = np.histogram(res,
+                            np.arange(bins[0], bins[-1]+bin_width, bin_width))
+
+    bin_centers, bin_width = (bins[1:] + bins[:-1]) / 2., bins[1] - bins[0]
+    pos_h0 = h0 != 0
+    residuals_fit = stats.pdf_skewnorm(bin_centers, np.sum(h0) * bin_width, *distr_popt)
+    chi_sqr = np.sum((h0[pos_h0] - residuals_fit[pos_h0])**2 / h0[pos_h0])
+
+    # Save figure
+    if verbose:
+        gs = GridSpec(1, 4)
+        fig = plt.figure(figsize=(16, 9))
+        axData, axHist = fig.add_subplot(gs[:3]), fig.add_subplot(gs[-1])
+
+        axData.plot(x, y, ".", label="Data", zorder=1)
+        k = len(func_popt) // 2
+        axData.plot(x, y_model, linewidth=2., zorder=3, label=f"Best fit (k: {k})")
+        axData.scatter(func_popt[:k], func_popt[k:], color="r", zorder=4)
+        if plot_mean:
+            axData.plot(x, stats.kde_smoothing(y, kernel_size), label="kde", zorder=2)
+        axData.legend(loc="best")
+        axData.set_ylabel("logPSD")
+
+        axHist.hist(res, bins, histtype="step")
+        axHist.plot(bin_centers, residuals_fit)
+        axHist.set_xlabel("Residuals (logPSD)")
+        axHist.set_title(r"Skew-normal $\chi^2/dof$: " + f"{chi_sqr / (np.sum(pos_h0) - 3):.1f}")
+        plt.show()
+
+    return i, func_popt, distr_popt, chi_sqr / (np.sum(pos_h0) - 3)
 
 
 def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
                            pruning=1, segment_size=10000, ana_fmin=10, ana_fmax=5000,
                            **kwargs):
     """ TODO """
-    # Check if output exists
-    # TODO
+    # TODO: Check if output exists
     data = LPSDOutput(data_path)
 
     # Start parallel BIC-based calculation
@@ -252,7 +299,7 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
                                "alpha_skew", "loc_skew", "sigma_skew", "chi_sqr"])
     zipped_positions = list(zip(positions[:-1], positions[1:]))
     for result in tqdm(results, desc="Combine results"):
-        i, f_popt, distr_popt = result
+        i, f_popt, distr_popt, chi = result
         start, end = zipped_positions[i]
 
         assert not len(f_popt) % 2
@@ -265,7 +312,7 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
              "alpha_skew": distr_popt[2],
              "loc_skew": distr_popt[0],
              "sigma_skew": distr_popt[1],
-             "chi_sqr": 0  # TODO
+             "chi_sqr": chi
              })])
 
     # Save to df # TODO: use IO class?
