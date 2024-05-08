@@ -36,7 +36,7 @@ $path_to_lpsd_exec \
 	-f 16384 \
 	-h 1 \
 	-i ${filename}\
-    -D ${dataset}\
+	-D ${dataset}\
 	-l 20 \
 	-n ${batch_size} \
 	-o ${outfilename} \
@@ -49,5 +49,5 @@ $path_to_lpsd_exec \
 	-x 1 \
 	-N ${iter} \
 	-J ${Nfreqs_full} \
-    -E ${block_eps} \
+	-E ${block_eps} \
 	-M ${n_memory}
