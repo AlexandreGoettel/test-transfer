@@ -281,8 +281,26 @@ def process_iteration(args):
 def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
                            pruning=1, segment_size=10000, ana_fmin=10, ana_fmax=5000,
                            **kwargs):
-    """ TODO """
-    # TODO: Check if output exists
+    """
+    Fit a background model to power spectral density from a LPSD or LPSDOutput file.
+
+    Parameters:
+        data_path (str): Path to the input data file.
+        output_path (str): Path to the (L)PSD, .h5 or .lpsd.
+        n_processes (int): Number of parallel processes to use.
+        buffer (int): To adjust data segment boundaries.
+        pruning (int): For data reduction.
+        segment_size (int): Size of each data segment for fitting.
+        ana_fmin (float): Minimum frequency.
+        ana_fmax (float): Maximum frequency.
+        **kwargs: Additional keyword arguments for the fitting function.
+
+    Raises:
+        ValueError: If the data file does not exist.
+    """
+    if not os.path.exists(data_path):
+        print(f"[ERROR] The file '{data_path}' does not exist, aborting..")
+        raise ValueError
     data = LPSDOutput(data_path)
 
     # Start parallel BIC-based calculation
