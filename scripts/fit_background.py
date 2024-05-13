@@ -1,7 +1,6 @@
 """Spline fit log-log background in frequency chunks."""
 import os
 import argparse
-import json
 from multiprocessing import Pool
 import glob
 from tqdm import tqdm
@@ -12,7 +11,7 @@ from matplotlib.gridspec import GridSpec
 from scipy.optimize import minimize
 # Project imports
 from LPSDIO import LPSDOutput, LPSDJSONIO
-import models  # only to be called in BkgModel object
+import models  # only to be called in BkgModel
 import stats
 import hist
 
@@ -348,7 +347,7 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
              })])
 
     mngr = LPSDJSONIO(output_path)
-    mngr.update_file(mngr.get_label(data_path), df)
+    mngr.update_file(data_path, df)
 
 
 if __name__ == '__main__':

@@ -7,8 +7,40 @@ from tqdm import tqdm
 import h5py
 import numpy as np
 import pandas as pd
+from scipy.interpolate import interp1d
 # Project imports
 from utils import LPSDVars
+
+
+def get_A_star(tf_path):
+    """Return dict of interpolant to the transfer functions for each ifo."""
+    transfer_function = {}
+    transfer_function["H1"] = pd.read_csv(os.path.join(tf_path, "Amp_Cal_LHO.txt"),
+                                          delimiter="\t")
+    transfer_function["L1"] = pd.read_csv(os.path.join(tf_path, "Amp_Cal_LLO.txt",
+                                                       delimiter="\t"))
+    f_A_star = {"H1": interp1d(transfer_function["H1"]["Freq_o"],
+                               transfer_function["H1"]["Amp_Cal_LHO"]),
+                "L1": interp1d(transfer_function["L1"]["Freq_Cal"],
+                               transfer_function["L1"]["amp_cal_LLO"])}
+    return f_A_star
+
+
+def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
+    """Get simple df label from filepath."""
+    if filepath is None:
+        assert all([x is not None for x in [t0, t1, ifo]])
+        return f"{prefix}_{t0}_{t1}_{ifo}"
+    else:
+        main, _ = os.path.splitext(os.path.split(filepath)[-1])
+        body = "_".join(main.split("_")[-3:])
+        return f"{prefix}_{body}"
+
+
+def sep_label(filepath):
+    """Extract timestamp and ifo from LPSD output filepath."""
+    t0, t1, ifo = os.path.splitext(os.path.split(filepath)[-1])[0].split("_")[-3:]
+    return t0, t1, ifo
 
 
 class LPSDJSONIO:
@@ -16,6 +48,12 @@ class LPSDJSONIO:
 
     def __init__(self, filename):
         self.filename = filename
+        self.data = None
+        self.update_data()
+
+    def update_data(self):
+        with open(self.filename, "r") as _file:
+            self.data = json.load(_file)
 
     def update_file(self, name, df, orient="records"):
         """Write data to the JSON file, give it reference "name"."""
@@ -25,9 +63,10 @@ class LPSDJSONIO:
                 data = json.load(_file)
 
         # Update data with dataframe contents & save
-        data[name] = df.to_json(orient=orient)
+        data[get_label(name)] = df.to_json(orient=orient)
         with open(self.filename, "w") as _file:
             json.dump(data, _file)
+        self.update_data()
 
     def get_df(self, name):
         """Get a dataframe labelled "name" from the JSON file."""
@@ -42,12 +81,6 @@ class LPSDJSONIO:
 
         # Convert the JSON object back to DataFrame
         return pd.read_json(json_df)
-
-    def get_label(self, filepath, prefix="bkginfo"):
-        """Get simple df label from filepath."""
-        main, _ = os.path.splitext(os.path.split(filepath)[-1])
-        body = "_".join(main.split("_")[-3:])
-        return f"{prefix}_{body}"
 
 
 class LPSDDataGroup:
@@ -66,7 +99,7 @@ class LPSDDataGroup:
         else:
             raise IOError("Invalid path: '{_data_path}'.")
 
-        self.freq, self.logPSD = self.read_all_data(files)
+        self.freq, self.logPSD, self.metadata = self.read_all_data(files)
 
     def create_buffer_path(self, data_path, suffix=".h5"):
         """Create path based on data_path to store interim HDF data for fast retrieval."""
@@ -76,32 +109,56 @@ class LPSDDataGroup:
 
     def read_all_data(self, files):
         """Read from all files in 'files' and combine."""
+        files = sorted(files)  # For reproducibility
+
         if os.path.exists(self.buffer_path):
             print("[INFO] Buffer exists, ignoring raw data files..")
             with h5py.File(self.buffer_path, "r") as buffer:
                 freq = np.array(buffer["freq"])
                 logPSD = np.array(buffer["logPSD"])
-            return freq, logPSD
-
-        data = [LPSDOutput(f) for f in files]
+                metadata = dict(buffer["logPSD"].attrs)
+            metadata = self.convert_metadata_Nones(metadata)
+            return freq, logPSD, metadata
 
         # Make sure that all files are compatible
+        data = [LPSDOutput(f) for f in files]
         _len = len(data[0])
         assert not any([len(f) != _len for f in data[1:]])
+
+        # Get metadata
+        metadata = {"t0": [], "t1": [], "ifo": []}
+        for x in data[0].kwargs.keys():
+            metadata[x] = []
+        for i, filename in enumerate(files):
+            t0, t1, ifo = sep_label(filename)
+            metadata["t0"].append(int(t0))
+            metadata["t1"].append(int(t1))
+            metadata["ifo"].append(ifo)
+            for k, v in data[i].kwargs.items():
+                metadata[k].append(v)
 
         # Combine to numpy array
         freq = data[0].freq
         output = np.zeros((len(data), _len), dtype=np.float64)
         for i, row in enumerate(data):
             output[i, :] = row.logPSD
-        return freq, output
+        return freq, output, metadata
 
     def save_data(self):
         """Save gathered data to HDF format."""
         print(f"[INFO] Saving buffer to {self.buffer_path}..")
+        self.metadata = self.convert_metadata_Nones(self.metadata)
         with h5py.File(self.buffer_path, "w") as outfile:
             outfile.create_dataset("freq", data=self.freq)
             outfile.create_dataset("logPSD", data=self.logPSD)
+            outfile["logPSD"].attrs.update(self.metadata)
+
+    def convert_metadata_Nones(self, metadata):
+        """Convert -1 to None or viceversa."""
+        for k, v in metadata.items():
+            metadata[k] = [None if x == -1 else (-1 if x is None else x) for x in v]
+        return metadata
+
 
 class LPSDData:
     """Hold & manage LPSD output data."""

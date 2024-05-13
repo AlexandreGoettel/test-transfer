@@ -3,10 +3,70 @@ import numpy as np
 from scipy.stats import norm, skewnorm, skew
 from scipy.special import owens_t, erf
 from scipy.signal import convolve
+from scipy import constants
+from findiff import FinDiff
 
 
 _LOG_2_PI = 0.5 * np.log(2 * np.pi)
 _LOG_2_PI_TERM = np.log(2) - _LOG_2_PI
+RHO_LOCAL = 0.4 / (constants.hbar / constants.e
+                   * 1e-7 * constants.c)**3  # GeV/cm^3 to GeV^4
+
+
+def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
+    """Likelihood of finding dark matter in the data."""
+    # Actual likelihood calculation
+    mu_DM = params
+    assert Y.shape[0] == bkg.shape[0] and Y.shape[1] == peak_shape.shape[0]
+    try:
+        residuals = Y - np.log(np.exp(bkg) + peak_norm*peak_shape*mu_DM)
+    except Exception as err:
+        raise err
+    log_lkl = np.log(pdf_skewnorm(residuals, *[model_args[:, i][:, None] for i in range(3)]))
+    assert log_lkl.shape == Y.shape
+
+    # Add infinity protection - breaks norm but ok in empirical tests
+    mask = np.isinf(log_lkl)
+    if np.sum(mask):
+        row_mins = np.min(np.where(mask, np.inf, log_lkl), axis=1)
+        log_lkl[mask] = np.take(row_mins, np.where(mask)[0])
+
+    return np.sum(np.sum(log_lkl, axis=1))
+
+
+def sigma_at_point(func, point, initial_dx=1e-5, tolerance=1e-6, max_iterations=100):
+    """
+    Compute the derivative of a function at a given max. lkl. using findiff.
+
+    Parameters:
+    - func: The function to differentiate.
+    - point: The point at which to compute the derivative.
+    - initial_dx: Starting value for dx.
+    - tolerance: Tolerance for derivative stabilization.
+    - max_iterations: Maximum number of iterations to adjust dx.
+
+    Returns:
+    - Derivative estimate at the given point.
+    """
+    dx = initial_dx
+    prev_derivative = None
+    for _ in range(max_iterations):
+        # Create the differential operator for the first derivative with respect to x
+        d_dx = FinDiff(0, dx, 2)
+
+        # Compute the derivative using a small interval around the point
+        x_values = np.array([point - 2*dx, point - dx, point, point + dx, point + 2*dx])
+        y_values = np.array([func(x) for x in x_values])
+        derivative = d_dx(y_values)[2]
+
+        # Check if the derivative estimate has stabilized
+        if prev_derivative is not None and\
+                abs((derivative - prev_derivative)/prev_derivative) < tolerance:
+            return np.sqrt(-1. / derivative)
+        prev_derivative = derivative
+        dx /= 2  # Double the dx for the next iteration
+
+    raise ValueError("Failed to converge to a stable derivative estimate.")
 
 
 def pdf_skewnorm(x, A, loc=0, scale=1, alpha=0):
