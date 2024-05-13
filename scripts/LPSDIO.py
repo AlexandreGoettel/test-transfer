@@ -17,8 +17,8 @@ def get_A_star(tf_path):
     transfer_function = {}
     transfer_function["H1"] = pd.read_csv(os.path.join(tf_path, "Amp_Cal_LHO.txt"),
                                           delimiter="\t")
-    transfer_function["L1"] = pd.read_csv(os.path.join(tf_path, "Amp_Cal_LLO.txt",
-                                                       delimiter="\t"))
+    transfer_function["L1"] = pd.read_csv(os.path.join(tf_path, "Amp_Cal_LLO.txt"),
+                                          delimiter="\t")
     f_A_star = {"H1": interp1d(transfer_function["H1"]["Freq_o"],
                                transfer_function["H1"]["Amp_Cal_LHO"]),
                 "L1": interp1d(transfer_function["L1"]["Freq_Cal"],

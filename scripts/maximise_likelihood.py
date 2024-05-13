@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 from scipy import constants
 from scipy.optimize import minimize
+import h5py
 # Project imports
 from LPSDIO import LPSDDataGroup, LPSDJSONIO, get_A_star
 from fit_background import bkg_model
@@ -20,6 +21,12 @@ def parse_args():
                         help="If data-path is a dir, only consider files starting with prefix.")
     parser.add_argument("--peak-shape-file", type=str, required=True,
                         help="Path to the peak shape numpy file.")
+    parser.add_argument("--bkg-info-path", type=str, required=True,
+                        help="Output data from fit_background.py.")
+    parser.add_argument("--tf-path", type=str, required=True,
+                        help="Path to directory holding transfer functions.")
+    parser.add_argument("--output-path", type=str, required=True,
+                        help="Path to file (ending in .h5 or .hdf5) to store the results.")
     parser.add_argument("--iteration", type=int, default=0,
                         help="Condor iteration number")
     parser.add_argument("--batch-size", type=int, default=-1,
@@ -28,14 +35,10 @@ def parse_args():
                         help="Minimum analysis frequency.")
     parser.add_argument("--ana-fmax", type=float, default=5000,
                         help="Maximum analysis frequency.")
-    parser.add_argument("--bkg-info-path", type=str, required=True,
-                        help="Output data from fit_background.py.")
     parser.add_argument("--max-chi-sqr", type=float, default=10.,
                         help="Maximum chi^2/dof value for skew-norm fits.")
     parser.add_argument("--n-processes", type=int, default=1,
                         help="If > 1, use multiprocessing.")
-    parser.add_argument("--tf-dir", type=str, required=True,
-                        help="Path to directory holding transfer functions.")
     parser.add_argument("--min-log10mu", type=int, default=-40,
                         help="Min of the log10mu values to investigate.")
     parser.add_argument("--max-log10mu", type=int, default=-32,
@@ -118,7 +121,7 @@ def calc_max_lkl(Y, bkg, model_args, peak_norm, peak_shape,
     test_lkl = np.array([-log_lkl_shape([mu]) for mu in test_mus])
     mask = np.isnan(test_lkl) | np.isinf(test_lkl)
     if not any(~mask):
-        return 0, 0, 0
+        return np.nan, np.nan, np.nan, np.nan
     initial_guess = test_mus[np.argmin(test_lkl[~mask])]
 
     # Calculate max lkl
@@ -232,14 +235,18 @@ def main(data_path=None, peak_shape_file=None, output_path=None, bkg_info_path=N
     lkl_data = np.zeros((len(results), 5))
     for i, result in enumerate(results):
         lkl_data[i, :] = result  # freq, max_lkl, zero_lkl, mu_hat, sigma
-    lkl_data = lkl_data[~np.isnan(lkl_data[0, :])]  # Clean
-    lkl_data = lkl_data[np.argsort(lkl_data[0, :])]  # Sort
-    np.save(output_path, lkl_data)  # Save metadata too! # TODO
+    lkl_data = lkl_data[~np.isnan(lkl_data[:, 0]), :]  # Clean
+    lkl_data = lkl_data[np.argsort(lkl_data[:, 0]), :]  # Sort
+
+    _locals = locals()
+    vars_to_save = ['data_path', 'peak_shape_file', 'output_path', 'bkg_info_path', 'tf_path',
+                    'data_prefix', 'iteration', 'ana_fmin', 'ana_fmax', 'batch_size',
+                    'max_chi_sqr', 'n_processes', 'min_log10mu', 'max_log10mu']
+    kwargs = {name: str(_locals[name]) for name in vars_to_save}
+    with h5py.File(output_path, "w") as _file:
+        _file.create_dataset("lkl_data", data=lkl_data)
+        _file["lkl_data"].attrs.update(kwargs)
 
 
 if __name__ == '__main__':
-    # _kwargs = parse_args()
-    # _data_path = _kwargs.pop("data_path")
-    # _output_path = _kwargs.pop("output_path")
-    # _data_prefix = _kwargs.pop("data_prefix")
     main(**parse_args())
