@@ -50,6 +50,59 @@ class LPSDJSONIO:
         return f"{prefix}_{body}"
 
 
+class LPSDDataGroup:
+    """Gather & generalise several LPSD output files."""
+
+    def __init__(self, data_path, data_prefix=""):
+        """Read data found in data_path to numpy format."""
+        self.data_path = data_path
+        self.data_prefix = data_prefix
+        self.buffer_path = self.create_buffer_path(data_path)
+
+        if os.path.isdir(data_path):
+            files = list(glob.glob(os.path.join(data_path, f"{data_prefix}*")))
+        elif os.path.exists(data_path):
+            files = [data_path]
+        else:
+            raise IOError("Invalid path: '{_data_path}'.")
+
+        self.freq, self.logPSD = self.read_all_data(files)
+
+    def create_buffer_path(self, data_path, suffix=".h5"):
+        """Create path based on data_path to store interim HDF data for fast retrieval."""
+        loc, body = os.path.split(data_path)
+        (main, _) = os.path.splitext(body)
+        return os.path.join(loc, f"buffer_{main}{suffix}")
+
+    def read_all_data(self, files):
+        """Read from all files in 'files' and combine."""
+        if os.path.exists(self.buffer_path):
+            print("[INFO] Buffer exists, ignoring raw data files..")
+            with h5py.File(self.buffer_path, "r") as buffer:
+                freq = np.array(buffer["freq"])
+                logPSD = np.array(buffer["logPSD"])
+            return freq, logPSD
+
+        data = [LPSDOutput(f) for f in files]
+
+        # Make sure that all files are compatible
+        _len = len(data[0])
+        assert not any([len(f) != _len for f in data[1:]])
+
+        # Combine to numpy array
+        freq = data[0].freq
+        output = np.zeros((len(data), _len), dtype=np.float64)
+        for i, row in enumerate(data):
+            output[i, :] = row.logPSD
+        return freq, output
+
+    def save_data(self):
+        """Save gathered data to HDF format."""
+        print(f"[INFO] Saving buffer to {self.buffer_path}..")
+        with h5py.File(self.buffer_path, "w") as outfile:
+            outfile.create_dataset("freq", data=self.freq)
+            outfile.create_dataset("logPSD", data=self.logPSD)
+
 class LPSDData:
     """Hold & manage LPSD output data."""
 
@@ -76,7 +129,7 @@ class LPSDData:
         return np.logspace(np.log10(self.kwargs["fmin"]),
                            np.log10(self.kwargs["fmax"]),
                            int(self.kwargs["Jdes"])
-                           )[:-1]
+                           )
 
 
 class LPSDOutput(LPSDData):
@@ -96,10 +149,11 @@ class LPSDOutput(LPSDData):
         if is_hdf5:
             self.freq, self.logPSD = self.read_hdf5()
         else:
-            self.freq = self.freq_from_kwargs()
-            _, psd = self.read()
+            raw_freq, psd = self.read(raw_freq=True)
             # Protection against (old) LPSD bug
             self.logPSD = np.log(psd[:-1]) if psd[-1] == 0 else np.log(psd)
+            self.freq = self.freq_from_kwargs() if len(self.logPSD) == int(self.kwargs["Jdes"])\
+                else raw_freq
 
         super().__init__(self.logPSD, freq=self.freq, **self.kwargs)
 
