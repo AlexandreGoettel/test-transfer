@@ -82,8 +82,9 @@ def get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
     def get_mu_ranges(test_mus):
         valid_mu_ranges = np.zeros((len(Y), 2))
         for i, logPSD in enumerate(Y):
-            residuals = logPSD - np.log(np.exp(bkg[i]) + peak_norm[i]*test_mus)
-            log_lkl_values = np.log(stats.pdf_skewnorm(residuals, *model_args[i]))
+            residuals = logPSD - np.log(np.exp(bkg[i]) + peak_norm[i]*test_mus[:, None])
+            log_lkl_values = np.log(stats.pdf_skewnorm(residuals, 1, *model_args[i]))
+            log_lkl_values = np.sum(log_lkl_values, axis=1)
             start, end = find_leading_trailing_invalid(log_lkl_values)
 
             if not np.isnan(log_lkl_values[0]) and start:
@@ -110,36 +111,44 @@ def get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
 
 
 def calc_max_lkl(Y, bkg, model_args, peak_norm, peak_shape,
-                 min_log10mu=-40, max_log10mu=-32, n_seed_lkl=1000):
+                 min_log10mu=-45, max_log10mu=-32, n_seed_lkl=1000):
     """Calculate maximum likelihood information."""
     # Question: do I calculate sigma here as well? Might as well no?
     def log_lkl_shape(params):
         return stats.log_likelihood(params[0], Y, bkg, peak_norm, peak_shape, model_args)
 
-    # Get initial guess for mu, based on peak_shape
-    test_mus = np.logspace(min_log10mu, max_log10mu, n_seed_lkl)
-    test_lkl = np.array([-log_lkl_shape([mu]) for mu in test_mus])
-    mask = np.isnan(test_lkl) | np.isinf(test_lkl)
-    if not any(~mask):
+    # Get initial guess for mu, based on lkl
+    valid_mu_ranges = get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
+                                          start=min_log10mu, end=max_log10mu, n=1000)
+    if not valid_mu_ranges:
         return np.nan, np.nan, np.nan, np.nan
-    initial_guess = test_mus[np.argmin(test_lkl[~mask])]
+    max_test_lkl = np.inf
+    for mu_range in valid_mu_ranges:
+        test_mus = np.sign(mu_range[0])*np.logspace(np.log10(abs(min(mu_range))),
+                                                    np.log10(abs(max(mu_range))),
+                                                    n_seed_lkl)
+        test_lkl = np.array([-log_lkl_shape([mu]) for mu in test_mus])
+        mask = np.isnan(test_lkl) | np.isinf(test_lkl)
+        assert not np.sum(mask)  # FIXME
+        _test_lkl = min(test_lkl[~mask])
+        if _test_lkl < max_test_lkl:
+            initial_guess = test_mus[np.argmin(test_lkl[~mask])]
+            max_test_lkl = _test_lkl
 
     # Calculate max lkl
+    bounds = [(None, 0)] if initial_guess < 0 else [(0, None)]
     popt_peak_shape = minimize(
         lambda x: -log_lkl_shape(x),
         [initial_guess],
-        bounds=[(0, None)],
+        bounds=bounds,
         method="Nelder-Mead",
         tol=1e-10)
-
     # Get max & zero lkl
     zero_lkl = log_lkl_shape([0])
     max_lkl = -popt_peak_shape.fun
     mu = popt_peak_shape.x[0]
 
     # Calculate uncertainty on mu
-    valid_mu_ranges = get_valid_mu_ranges(Y, bkg, peak_norm, model_args,
-                                          start=min_log10mu, end=max_log10mu, n=1000)
     max_dist = min(mu - valid_mu_ranges[0][0], valid_mu_ranges[0][1] - mu)\
         if mu > 0 else min(mu - valid_mu_ranges[1][0], valid_mu_ranges[1][1] - mu)
     try:
@@ -149,7 +158,7 @@ def calc_max_lkl(Y, bkg, model_args, peak_norm, peak_shape,
                                      initial_dx=min(max_dist/2., abs(mu)),
                                      tolerance=1e-4)
         assert not np.isnan(sigma)
-    except (ValueError, AssertionError):
+    except (ValueError, AssertionError) as err:
         return np.nan, np.nan, np.nan, np.nan
     # TODO: Could also calculate zero-side of two-sided exact logL sigma
     return zero_lkl, max_lkl, mu, sigma
@@ -211,7 +220,7 @@ def main(data_path=None, peak_shape_file=None, output_path=None, bkg_info_path=N
                     continue
 
                 _bkg = bkg_model(np.log(freq_Hz), np.concatenate([x_knots, y_knots]))
-                _model_args = [alpha_skew, loc_skew, sigma_skew]
+                _model_args = [loc_skew, sigma_skew, alpha_skew]
                 ifo = data.metadata["ifo"][j]
                 _beta = stats.RHO_LOCAL / (np.pi*freq_Hz**3 * f_A_star[ifo](freq_Hz)**2
                                            * (constants.e / constants.h)**2)

@@ -22,7 +22,8 @@ def log_likelihood(params, Y, bkg, peak_norm, peak_shape, model_args):
         residuals = Y - np.log(np.exp(bkg) + peak_norm*peak_shape*mu_DM)
     except Exception as err:
         raise err
-    log_lkl = np.log(pdf_skewnorm(residuals, *[model_args[:, i][:, None] for i in range(3)]))
+    # TODO Add NaN protection
+    log_lkl = np.log(pdf_skewnorm(residuals, 1, *[model_args[:, i][:, None] for i in range(3)]))
     assert log_lkl.shape == Y.shape
 
     # Add infinity protection - breaks norm but ok in empirical tests
@@ -50,6 +51,7 @@ def sigma_at_point(func, point, initial_dx=1e-5, tolerance=1e-6, max_iterations=
     """
     dx = initial_dx
     prev_derivative = None
+
     for _ in range(max_iterations):
         # Create the differential operator for the first derivative with respect to x
         d_dx = FinDiff(0, dx, 2)
