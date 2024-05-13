@@ -54,7 +54,7 @@ class LPSDData:
     """Hold & manage LPSD output data."""
 
     def __init__(self, logPSD, freq=None, **kwargs):
-        assert all([flag in kwargs for flag in ["fmin", "fmax", "fs", "Jdes", "epsilon"]])
+        assert all([flag in kwargs for flag in ["fmin", "fmax", "fs", "Jdes"]])
         self.kwargs = kwargs
         self.logPSD = logPSD
         if freq is None:
@@ -63,6 +63,8 @@ class LPSDData:
         if "resolution" not in kwargs:
             kwargs["resolution"] = np.exp((np.log(kwargs["fmax"]) - np.log(kwargs["fmin"])) /\
                 (kwargs["Jdes"] - 1)) - 1.
+        if "epsilon" not in kwargs:
+            kwargs["epsilon"] = None
         self.vars = LPSDVars(*map(lambda x: kwargs[x],
                                   ["fmin", "fmax", "resolution", "fs", "epsilon"]))
 
@@ -85,7 +87,7 @@ class LPSDOutput(LPSDData):
         is_hdf5 = filename.endswith(".h5") or filename.endswith(".hdf5")
         self.kwargs = self.get_lpsd_kwargs_hdf5() if is_hdf5 else self.get_lpsd_kwargs()
         # Check that file is valid
-        assert np.nan not in self.kwargs.values()
+        assert self.kwargs
         # This function is only meant to process complete files
         if "batch" in self.kwargs:
             assert self.kwargs["Jdes"] == self.kwargs["batch"]
@@ -99,7 +101,7 @@ class LPSDOutput(LPSDData):
             # Protection against (old) LPSD bug
             self.logPSD = np.log(psd[:-1]) if psd[-1] == 0 else np.log(psd)
 
-            for row in tqdm(data, total=int(self.kwargs["Jdes"]), desc="Reading LPSD", leave=False):
+        super().__init__(self.logPSD, freq=self.freq, **self.kwargs)
 
     def get_lpsd_kwargs_hdf5(self, dset="logPSD"):
         """Extract LPSD parameters from a lpsd .h5 file."""
@@ -122,7 +124,7 @@ class LPSDOutput(LPSDData):
                     line_flags = line.split()
                     values = [(float(line_flags[line_flags.index(f"-{flag}") + 1])
                             if f"-{flag}" in line_flags
-                            else np.nan)
+                            else None)
                             for flag in flags.values()]
                     return dict(zip(flags.keys(), values))
         raise IOError("Invalid output file.")
@@ -142,7 +144,7 @@ class LPSDOutput(LPSDData):
         x, y = [], []
         with open(self.filename, "r") as _file:
             data = csv.reader(_file, delimiter=delimiter)
-            for row in tqdm(data, total=self.kwargs["Jdes"], desc="Reading LPSD", leave=False):
+            for row in tqdm(data, total=int(self.kwargs["Jdes"]), desc="Reading LPSD", leave=False):
                 try:
                     if raw_freq:
                         x += [float(row[0])]
