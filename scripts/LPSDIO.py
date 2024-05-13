@@ -1,10 +1,53 @@
 """Communicate to and from disk for LPSD-relevant variables and results."""
+import os
+import glob
 import csv
+import json
 from tqdm import tqdm
 import h5py
 import numpy as np
+import pandas as pd
 # Project imports
 from utils import LPSDVars
+
+
+class LPSDJSONIO:
+    """Read/Write from JSON files."""
+
+    def __init__(self, filename):
+        self.filename = filename
+
+    def update_file(self, name, df, orient="records"):
+        """Write data to the JSON file, give it reference "name"."""
+        data = {}
+        if os.path.exists(self.filename):
+            with open(self.filename, "r") as _file:
+                data = json.load(_file)
+
+        # Update data with dataframe contents & save
+        data[name] = df.to_json(orient=orient)
+        with open(self.filename, "w") as _file:
+            json.dump(data, _file)
+
+    def get_df(self, name):
+        """Get a dataframe labelled "name" from the JSON file."""
+        if not os.path.exists(self.filename):
+            raise IOError(f"File '{self.filename}' does not exist..")
+
+        with open(self.filename, 'r') as file:
+            data = json.load(file)
+        json_df = data.get(name)
+        if json_df is None:
+            raise IOError(f"'{name} is not in '{self.filename}..")
+
+        # Convert the JSON object back to DataFrame
+        return pd.read_json(json_df)
+
+    def get_label(self, filepath, prefix="bkginfo"):
+        """Get simple df label from filepath."""
+        main, _ = os.path.splitext(os.path.split(filepath)[-1])
+        body = "_".join(main.split("_")[-3:])
+        return f"{prefix}_{body}"
 
 
 class LPSDData:
@@ -56,7 +99,7 @@ class LPSDOutput(LPSDData):
             # Protection against (old) LPSD bug
             self.logPSD = np.log(psd[:-1]) if psd[-1] == 0 else np.log(psd)
 
-        super().__init__(self.logPSD, freq=self.freq, **self.kwargs)
+            for row in tqdm(data, total=int(self.kwargs["Jdes"]), desc="Reading LPSD", leave=False):
 
     def get_lpsd_kwargs_hdf5(self, dset="logPSD"):
         """Extract LPSD parameters from a lpsd .h5 file."""

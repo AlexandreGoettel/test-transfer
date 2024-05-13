@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 from scipy.optimize import minimize
 # Project imports
-from LPSDIO import LPSDOutput
+from LPSDIO import LPSDOutput, LPSDJSONIO
 import models  # only to be called in BkgModel object
 import stats
 import hist
@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--plot-path", type=str, default=None,
                         help="If verbose, path to dir in which to save plots.")
-    parser.add_argument("--kernel-size", type=int, default=10,
+    parser.add_argument("--kernel-size", type=int, default=30,
                         help="If verbose, smoothing kernel size in BIC plot.")
     parser.add_argument("--cfd-fraction", type=float, default=.1,
                         help="Regularize fits given outliers.")
@@ -217,7 +217,7 @@ def process_iteration(args):
     kernel_size, plot_mean, verbose, plot_path = list(map(
         kwargs.pop, ["kernel_size", "plot_mean", "verbose", "plot_path"]))
     if verbose:
-        prefix = f"[{np.exp(x[0]):.3f}-{np.exp(x[-1]):.3f}]_Hz"
+        prefix = f"{np.exp(x[0]):.3f}_{np.exp(x[-1]):.3f}_Hz"
         try:
             plot_path = os.path.join(plot_path, f"{prefix}.png")
         except TypeError as err:
@@ -347,11 +347,8 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
              "chi_sqr": chi
              })])
 
-    # Save to df # TODO: use IO class?
-    data = {}
-    data[os.path.split(data_path)[-1]] = df.to_json(orient="records")
-    with open(output_path, 'w') as file:
-        json.dump(data, file)
+    mngr = LPSDJSONIO(output_path)
+    mngr.update_file(mngr.get_label(data_path), df)
 
 
 if __name__ == '__main__':
@@ -366,4 +363,4 @@ if __name__ == '__main__':
     elif os.path.exists(_data_path):
         fit_background_in_file(_data_path, _output_path, **_kwargs)
     else:
-        raise IOError("Invalid path: '{_data_path}'.")
+        raise IOError(f"Invalid path: '{_data_path}'.")
