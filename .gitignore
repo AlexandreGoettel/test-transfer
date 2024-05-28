@@ -1,7 +1,11 @@
+*.lpsd
 .idea/*
 .pylintrc
 .vscode/*
 shared_git_data/*
 test*
 tmp*
-*/__pycache__/*
+scripts/*
+archive/*
+data/*
+__pycache__/*

@@ -164,6 +164,7 @@ FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int N
     memset(data_subset_imag, 0, Nmax*sizeof(double));
     double *fft_output_real = (double*)malloc(Nmax*sizeof(double));
     double *fft_output_imag = (double*)malloc(Nmax*sizeof(double));
+    // TODO no need if no window
     double *window_subset = (double*)malloc((Nj0_over_two_n_depth+1)*sizeof(double));
 
     // Perform FFTs on bottom layer of pyramid and save results to temporary file
@@ -176,14 +177,15 @@ FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int N
         hsize_t stride[1] = {two_to_n_depth};
         hsize_t rank = 1;
         read_from_dataset_stride(contents, offset, count, stride, rank, count, data_subset_real);
-
         // Zero-pad data
         for (unsigned int j = Ndata; j < Nmax; j++) data_subset_real[j] = 0;
 
         // Read window & apply to data (piecewise multiply)
         hsize_t window_offset[1] = {ordered_coefficients[i]};
-        read_from_dataset_stride(window_contents, window_offset, count, stride, rank, count, window_subset);
-        for (unsigned int j = 0; j < Ndata; j++) data_subset_real[j] *= window_subset[j];
+        if (window_contents) {
+			read_from_dataset_stride(window_contents, window_offset, count, stride, rank, count, window_subset);
+			for (unsigned int j = 0; j < Ndata; j++) data_subset_real[j] *= window_subset[j];
+		}
 
         // Take FFT
         FFT(data_subset_real, data_subset_imag, Nmax, fft_output_real, fft_output_imag);

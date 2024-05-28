@@ -602,7 +602,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	unsigned int memory_unit_index = 0;
 	unsigned int iteration_samples;
 
-	// Calculate window
+	// Calculate window normalisation
 	while (remaining_samples > 0) {
 		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
 		else iteration_samples = remaining_samples;
@@ -615,24 +615,37 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	xfree(window);
 	double norm_propto_factor = winsum2 / (double) Nj0;
 
+	// Prepare memory protection
+	struct hdf5_contents _contents;
+	struct hdf5_contents *_contents_ptr = NULL;
+	double *data_real, *data_imag, *fft_real, *fft_imag;
+	data_real = data_imag = fft_real = fft_imag = NULL;
+
 	// FFT over the (whole!) data
 	unsigned long int Nfft = get_next_power_of_two(nread);
-	// TODO: memory management for big-data scenarios
-	double *data_real, *data_imag, *fft_real, *fft_imag;
-	data_real = (double*) xmalloc(Nfft * sizeof(double));
-	data_imag = (double*) xmalloc(Nfft * sizeof(double));
-	fft_real = (double*) xmalloc(Nfft * sizeof(double));
-	fft_imag = (double*) xmalloc(Nfft * sizeof(double));
-	memset(data_imag, 0, Nfft * sizeof(double));
-	for (int i = nread; i < Nfft; i++) data_real[i] = 0;
+	if (Nfft > max_samples_in_memory) {
+		hsize_t rank = 2;
+		hsize_t dims[2] = {2, Nfft};
+		_contents_ptr = &_contents;
+		open_hdf5_file(_contents_ptr, "tmp.h5", "fft_contents", rank, dims);
+		FFT_control_memory(nread-1, Nfft, max_samples_in_memory, 0,
+		                   &contents, NULL, _contents_ptr);
+	} else {
+		data_real = (double*) xmalloc(Nfft * sizeof(double));
+		data_imag = (double*) xmalloc(Nfft * sizeof(double));
+		fft_real = (double*) xmalloc(Nfft * sizeof(double));
+		fft_imag = (double*) xmalloc(Nfft * sizeof(double));
+		memset(data_imag, 0, Nfft * sizeof(double));
+		for (int i = nread; i < Nfft; i++) data_real[i] = 0;
 
-	// Read and FFT data
-	hsize_t offset[1] = {0};
-	hsize_t count[1] = {nread-1};
-	hsize_t data_rank = 1;
-	hsize_t data_count[1] = {count[0]};
-	read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
-	FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
+		// Read and FFT data
+		hsize_t offset[1] = {0};
+		hsize_t count[1] = {nread-1};
+		hsize_t data_rank = 1;
+		hsize_t data_count[1] = {count[0]};
+		read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
+		FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
+	}
 
 	// Track time and progress
     struct timeval tv;
@@ -678,6 +691,23 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			if (delta_i < max_buffered_kernel_values) kernel_values[delta_i] = kernel_val;
 		}
 
+		// Read FFT information from disk //TODO: Can reduce repetitions?
+		long unsigned int fft_offset;
+		if (Nfft > max_samples_in_memory) {
+			fft_real = (double*) xmalloc((2*delta_i + 1) * sizeof(double));
+			fft_imag = (double*) xmalloc((2*delta_i + 1) * sizeof(double));
+			hsize_t offset[2] = {0, 0};
+			hsize_t count[2] = {1, 2*delta_i + 1};
+			hsize_t data_rank = 1;
+			hsize_t data_count[1] = {count[1]};
+			read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_real);
+			offset[0] = 1;
+			read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_imag);
+			fft_offset = ikernel - delta_i;
+		} else {
+			fft_offset = 0;
+		}
+
 		// Loop over segments
 		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
 		for (int k = 0; k < n_segments; k++) {
@@ -686,7 +716,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			segment_imag = 0;
 			for (unsigned long int _delta_i = 0; _delta_i <= delta_i; _delta_i++) {
 				// Adjust data location by multiplying exp's to the spectral terms
-				unsigned long int i_fft = ikernel + _delta_i;
+				unsigned long int i_fft = ikernel + _delta_i - fft_offset;
 				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
@@ -703,7 +733,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 
 				// Now the other side
 				if (_delta_i == 0 || ikernel - _delta_i < 1) continue;
-				i_fft = ikernel - _delta_i;
+				i_fft = ikernel - _delta_i - fft_offset;
 				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
@@ -717,6 +747,13 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		}
 		total *= pow((double) Lj / (double) Nfft, 2);
 
+		// Clean
+		if (Nfft > max_samples_in_memory) {
+			// TODO: There has to be a better way
+			xfree(fft_real);
+			xfree(fft_imag);
+			fft_real = fft_imag = NULL;
+		}
 		// - Fill data arrays
 		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
 		data->psd[j] = total * norm_psd;
@@ -731,13 +768,14 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	}
 
 	// Clean-up
-	xfree(data_real);
-	xfree(data_imag);
-	xfree(fft_real);
-	xfree(fft_imag);
+	if (data_real) xfree(data_real);
+	if (data_imag) xfree(data_imag);
+	if (fft_real) xfree(fft_real);
+	if (fft_imag) xfree(fft_imag);
 
 	// Finish
     close_hdf5_contents(&contents);
+    if (_contents_ptr) close_hdf5_contents(_contents_ptr);
     printf ("\b\b\b\b\b\b  100%%\n");
     fflush (stdout);
     gettimeofday (&tv, NULL);
