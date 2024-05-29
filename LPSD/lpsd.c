@@ -696,14 +696,14 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		if (Nfft > max_samples_in_memory) {
 			fft_real = (double*) xmalloc((2*delta_i + 1) * sizeof(double));
 			fft_imag = (double*) xmalloc((2*delta_i + 1) * sizeof(double));
-			hsize_t offset[2] = {0, 0};
+			fft_offset = ikernel - delta_i;
+			hsize_t offset[2] = {0, fft_offset};
 			hsize_t count[2] = {1, 2*delta_i + 1};
 			hsize_t data_rank = 1;
 			hsize_t data_count[1] = {count[1]};
 			read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_real);
 			offset[0] = 1;
 			read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_imag);
-			fft_offset = ikernel - delta_i;
 		} else {
 			fft_offset = 0;
 		}
@@ -716,7 +716,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			segment_imag = 0;
 			for (unsigned long int _delta_i = 0; _delta_i <= delta_i; _delta_i++) {
 				// Adjust data location by multiplying exp's to the spectral terms
-				unsigned long int i_fft = ikernel + _delta_i - fft_offset;
+				unsigned long int i_fft = ikernel + _delta_i;
 				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
@@ -728,20 +728,20 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 				sign = i_fft % 2 ? -1 : +1;
 
 				// Complex multiplication
-				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
-				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
+				segment_real += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
+				segment_imag += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
 
 				// Now the other side
 				if (_delta_i == 0 || ikernel - _delta_i < 1) continue;
-				i_fft = ikernel - _delta_i - fft_offset;
+				i_fft = ikernel - _delta_i;
 				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
 
 				// I have to re-calculate the kernel_val here because the rounding of the indices makes the kernel slightly asymmetric
 				kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
-				segment_real += kernel_val*sign * (fft_real[i_fft]*shift_real - fft_imag[i_fft]*shift_imag);
-				segment_imag += kernel_val*sign * (fft_real[i_fft]*shift_imag + fft_imag[i_fft]*shift_real);
+				segment_real += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
+				segment_imag += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
 			}
 			total += (segment_real*segment_real + segment_imag*segment_imag);
 		}
