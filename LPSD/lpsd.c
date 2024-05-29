@@ -101,6 +101,19 @@ get_mean (int* values, int N) {
     return _sum / N;
 }
 
+void
+// @brief Read (complex) FFT results from disk
+read_frequency_data(struct hdf5_contents *_contents_ptr, unsigned long int fft_offset, unsigned int max_samples_in_memory,
+                    double *fft_real, double *fft_imag) {
+	hsize_t offset[2] = {0, fft_offset};
+	hsize_t count[2] = {1, max_samples_in_memory};
+	hsize_t data_rank = 1;
+	hsize_t data_count[1] = {count[1]};
+	read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_real);
+	offset[0] = 1;
+	read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_imag);
+}
+
 // Get the segment length as a function of the frequency bin j
 // Rounded to nearest integer.
 // TODO: replace with call to nffts?
@@ -623,6 +636,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 
 	// FFT over the (whole!) data
 	unsigned long int Nfft = get_next_power_of_two(nread);
+	long unsigned int fft_offset = 0;
 	if (Nfft > max_samples_in_memory) {
 		hsize_t rank = 2;
 		hsize_t dims[2] = {2, Nfft};
@@ -630,6 +644,10 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		open_hdf5_file(_contents_ptr, "tmp.h5", "fft_contents", rank, dims);
 		FFT_control_memory(nread-1, Nfft, max_samples_in_memory, 0,
 		                   &contents, NULL, _contents_ptr);
+		// Read as much as you can
+		fft_real = (double*) xmalloc(max_samples_in_memory * sizeof(double));
+		fft_imag = (double*) xmalloc(max_samples_in_memory * sizeof(double));
+		read_frequency_data(_contents_ptr, fft_offset, max_samples_in_memory, fft_real, fft_imag);
 	} else {
 		data_real = (double*) xmalloc(Nfft * sizeof(double));
 		data_imag = (double*) xmalloc(Nfft * sizeof(double));
@@ -691,21 +709,10 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			if (delta_i < max_buffered_kernel_values) kernel_values[delta_i] = kernel_val;
 		}
 
-		// Read FFT information from disk //TODO: Can reduce repetitions?
-		long unsigned int fft_offset;
-		if (Nfft > max_samples_in_memory) {
-			fft_real = (double*) xmalloc((2*delta_i + 1) * sizeof(double));
-			fft_imag = (double*) xmalloc((2*delta_i + 1) * sizeof(double));
-			fft_offset = ikernel - delta_i;
-			hsize_t offset[2] = {0, fft_offset};
-			hsize_t count[2] = {1, 2*delta_i + 1};
-			hsize_t data_rank = 1;
-			hsize_t data_count[1] = {count[1]};
-			read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_real);
-			offset[0] = 1;
-			read_from_dataset(_contents_ptr, offset, count, data_rank, data_count, fft_imag);
-		} else {
-			fft_offset = 0;
+		if (ikernel + delta_i >= fft_offset + max_samples_in_memory) {
+			// Shift memory space over different disk space window
+			fft_offset = (ikernel - delta_i < Nfft - max_samples_in_memory) ? ikernel - delta_i : Nfft - max_samples_in_memory;
+			read_frequency_data(_contents_ptr, fft_offset, max_samples_in_memory, fft_real, fft_imag);
 		}
 
 		// Loop over segments
@@ -747,13 +754,6 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		}
 		total *= pow((double) Lj / (double) Nfft, 2);
 
-		// Clean
-		if (Nfft > max_samples_in_memory) {
-			// TODO: There has to be a better way
-			xfree(fft_real);
-			xfree(fft_imag);
-			fft_real = fft_imag = NULL;
-		}
 		// - Fill data arrays
 		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
 		data->psd[j] = total * norm_psd;
@@ -770,8 +770,8 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	// Clean-up
 	if (data_real) xfree(data_real);
 	if (data_imag) xfree(data_imag);
-	if (fft_real) xfree(fft_real);
-	if (fft_imag) xfree(fft_imag);
+	xfree(fft_real);
+	xfree(fft_imag);
 
 	// Finish
     close_hdf5_contents(&contents);
