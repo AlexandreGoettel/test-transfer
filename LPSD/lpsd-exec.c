@@ -29,7 +29,6 @@
 #include "ArgParser.h"
 #include "StrParser.h"
 #include "lpsd-exec.h"
-#include "goodn.h"
 #include "errors.h"
 
 extern double round(double x);
@@ -155,8 +154,6 @@ void getUserInput()
 	if (cfg.fres < 0) {
 		xov = (1. - cfg.ovlp / 100.);
 		cfg.fres = 1. / (data.nread/cfg.fsamp) * (1 + xov * (cfg.minAVG - 1));
-		cfg.nfft=round_downl(cfg.fsamp/cfg.fres);	/* suitable nfft for FFTW */
-		cfg.fres = cfg.fsamp / (double) cfg.nfft;
 	}
 	if (cfg.fmax < 0)
 		cfg.fmax = cfg.fsamp / 2.0;
@@ -168,7 +165,7 @@ void getUserInput()
 		askd("Max. frequency", &cfg.fmax);
 	if (cfg.METHOD == 0 || cfg.METHOD == 1) {	
 		if (cfg.asknspec == 1)
-			aski("Number of samples in spectrum", &cfg.nspec);
+			askil("Number of samples in spectrum", &cfg.nspec);
 		if (cfg.askminAVG == 1)
 			aski("Minimum number of averages", &cfg.minAVG);	
 		if (cfg.askdesAVG == 1)
@@ -230,55 +227,44 @@ void getDefaultValues()
 	}    
 	if (cfg.fmax < 0)
 		cfg.fmax = cfg.fsamp / 2.0;
-
-	// If fmin_fft or fmax_fft are not set, they should align with fmin and fmax
-//	if (cfg.fmin_fft < 0)
-//		cfg.fmin_fft = cfg.fmin;
-//	if (cfg.fmax_fft < 0)
-//		cfg.fmax_fft = cfg.fmax;
 }
 
-/* for debugging */
-double calculate_mean(double *segm, int nfft)
-{
-	int i;
-	double m = 0;
+void memalloc(tCFG *cfg, tDATA *data, DataPointers *dp) {
+	// Adjust the following arrays following tData
+    double **doubleMembers[] = {&data->fspec, &data->bins, &data->ps, &data->psd, &data->varps, &data->varpsd,
+                                &data->psd_real, &data->psd_imag, &data->psd_raw, &data->psd_raw_real, &data->psd_raw_imag};
+    int **intMembers[] = {&data->avg};
+    long int **liMembers[] = {&data->nffts};
 
-	for (i = 0; i < nfft; i++) {
-		m += segm[i];
-	}
-	return (m / (double) nfft);
+    dp->numDoublePointers = sizeof(doubleMembers) / sizeof(doubleMembers[0]);
+    dp->doublePointers = (double **) xmalloc(dp->numDoublePointers * sizeof(double *));
+    dp->numIntPointers = sizeof(intMembers) / sizeof(intMembers[0]);
+    dp->intPointers = (int **) xmalloc(dp->numIntPointers * sizeof(int *));
+    dp->numLiPointers = sizeof(liMembers) / sizeof(liMembers[0]);
+    dp->liPointers = (long int **) xmalloc(dp->numLiPointers * sizeof(long int *));
+
+    for (int i = 0; i < dp->numDoublePointers; ++i) {
+        *(doubleMembers[i]) = (double *) xmalloc(cfg->nspec * sizeof(double));
+        dp->doublePointers[i] = *(doubleMembers[i]);
+    }
+
+    for (int i = 0; i < dp->numIntPointers; i++) {
+		*(intMembers[i]) = (int *) xmalloc(cfg->nspec * sizeof(int));
+		dp->intPointers[i] = *(intMembers[i]);
+    }
+    for (int i = 0; i < dp->numLiPointers; i++) {
+		*(liMembers[i]) = (long int *) xmalloc(cfg->nspec * sizeof(long int));
+		dp->liPointers[i] = *(liMembers[i]);
+    }
 }
 
-void memalloc(tCFG * cfg, tDATA * data)
-{
-	(*data).ps = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).psd = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).varps = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).varpsd = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).psd_real = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).psd_imag = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).psd_raw = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).psd_raw_real = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).psd_raw_imag = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).fspec = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).bins = (double *) xmalloc(((*cfg).nspec) * sizeof(double));
-	(*data).nffts = (int *) xmalloc(((*cfg).nspec) * sizeof(int));
-	(*data).avg = (int *) xmalloc(((*cfg).nspec) * sizeof(int));
-}
-
-void memfree(tCFG *cfg, tDATA * data)
-{
-	xfree((*data).ps);
-	xfree((*data).psd);
-	xfree((*data).varps);
-	xfree((*data).varpsd);
-	xfree((*data).psd_real);
-	xfree((*data).psd_imag);
-	xfree((*data).fspec);
-	xfree((*data).bins);
-	xfree((*data).nffts);
-	xfree((*data).avg);
+void memfree(DataPointers *dp) {
+    for (int i = 0; i < dp->numDoublePointers; ++i)
+        xfree(dp->doublePointers[i]);
+    xfree(dp->doublePointers);
+    for (int i = 0; i < dp->numIntPointers; i++)
+        xfree(dp->intPointers[i]);
+    xfree(dp->intPointers);
 }
 
 void checkParams() {
@@ -313,15 +299,17 @@ int main(int argc, char *argv[])
 	if (cfg.usedefs==0) getUserInput();
 	else getDefaultValues();
 	getGNUTERM(cfg.gt, &gt);
-	printConfig(&s[0],cfg, wi, gt, data);
+	printConfig(&s[0], cfg, wi, gt, data);
 	printf("%s",s);
 
 	checkParams();
-	memalloc(&cfg, &data);
-	calculateSpectrum(&cfg,&data);
+	DataPointers dp;
+	memalloc(&cfg, &data, &dp);
+
+	calculateSpectrum(&cfg, &data);
 	saveResult(&cfg, &data, &gt, &wi, argc, argv);
 
-	memfree(&cfg, &data);
+	memfree(&dp);
 
 	return EXIT_SUCCESS;
 }

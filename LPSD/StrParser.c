@@ -35,9 +35,7 @@
 	returns 1 if s contains '%' character, 0 otherwise
 */
 int VarInStr(char *s) {
-	int p;
-	p=(int)strchr(s,'%');
-	return(p!=0);
+    return strchr(s, '%') != NULL;
 }
 
 /*

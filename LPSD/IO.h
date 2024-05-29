@@ -2,6 +2,7 @@
 #define __IO_h
 
 // Custom imports
+#include "config.h"
 #include "hdf5.h"
 
 // Declarations

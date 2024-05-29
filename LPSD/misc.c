@@ -17,8 +17,8 @@ void *xmalloc(size_t size) {
 }
 
 void xfree(void *p) {
-	nallocs--;
-	free(p);
+    if (p != NULL) {
+        nallocs--;
+        free(p);
+    }
 }
-
-extern inline double dMax  ( double x, double y ) { return x > y ? x : y; }

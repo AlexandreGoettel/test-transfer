@@ -1,3 +1,4 @@
+*.lpsd
 .idea/*
 .pylintrc
 .vscode/*
@@ -8,3 +9,7 @@ tmp*
 LPSD/CMakeFiles/*
 LPSD/Makefile
 LPSD/*.cmake
+scripts/*
+archive/*
+data/*
+__pycache__/*
