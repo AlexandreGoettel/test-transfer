@@ -14,7 +14,7 @@ void fill_ordered_coefficients(int, int*);
 void stride_over_array (double*, int, int, int, double*);
 
 void FFT(double*, double*, unsigned int, double*, double*);
-void FFT_control_memory(unsigned long int, unsigned long int, unsigned int,
+void FFT_control_memory(unsigned long int, unsigned long int, unsigned int, bool,
                         unsigned long int, struct hdf5_contents*,
                         struct hdf5_contents*, struct hdf5_contents*);
 

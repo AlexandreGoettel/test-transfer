@@ -140,11 +140,10 @@ FFT(double *data_real, double *data_imag, unsigned int N,
     xfree(X_odd_imag);
 }
 
-
 // Perform an FFT while controlling how much gets in memory by manually calculating the
 // top layers of the pyramid over sums
 void
-FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int Nmax,
+FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int Nmax, bool verbose,
                    unsigned long int segment_offset, struct hdf5_contents *contents,
                    struct hdf5_contents *window_contents, struct hdf5_contents *_contents)
 {
@@ -167,6 +166,13 @@ FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int N
     // TODO no need if no window
     double *window_subset = (double*)malloc((Nj0_over_two_n_depth+1)*sizeof(double));
 
+	// Track progress
+	if (verbose) {
+		printf("Computing out-of-core FFT:  00.0%%");
+		fflush(stdout);
+	}
+	double progress;
+	double total = (double)Nfft * ld_log2(Nfft);
     // Perform FFTs on bottom layer of pyramid and save results to temporary file
     for (unsigned int i = 0; i < two_to_n_depth; i++) {
         // Read data
@@ -201,6 +207,11 @@ FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int N
         write_to_hdf5(_contents, fft_output_imag, _offset, _count, _data_rank, _data_count);
         // Note: if I saved real/imag in one 2D array instead of two arrays,
         // I would only need one call to write_to_hdf5 in this loop. Could save time?
+        if (verbose) {
+			progress = ((double)i + 1) * (double)Nfft / (double)two_to_n_depth * (ld_log2(Nfft) - n_depth);
+			printf ("\b\b\b\b\b\b%5.1f%%", 100. * progress / total);
+			fflush(stdout);
+		}
     }
     // Clean-up
     free(data_subset_real);
@@ -216,7 +227,10 @@ FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int N
     double *odd_terms_real = (double*)malloc(Nmax*sizeof(double));
     double *odd_terms_imag = (double*)malloc(Nmax*sizeof(double));
     double *write_vector = (double*)malloc(Nmax*sizeof(double));
+
     // Now loop over the rest of the pyramid
+    int n_pyramid_layers = 1 + 2*(ld_pow(2, n_depth - 1) - 1);
+    int count = 0;
     while (n_depth > 0) {
         // Iterate n_depth
         n_depth--;
@@ -276,8 +290,19 @@ FFT_control_memory(unsigned long int Nj0, unsigned long int Nfft, unsigned int N
                 offset_right[0] = 1;
                 write_to_hdf5(_contents, write_vector, offset_right, count, data_rank, data_count);
             }
+            // Update progress
+            count++;
+            if (verbose) {
+				printf ("\b\b\b\b\b\b%5.1f%%", 100. * (progress + (total - progress) * count / n_pyramid_layers) / total);
+				fflush (stdout);
+			}
         }
     }
+    if (verbose) {
+		printf ("\b\b\b\b\b\b  100%%\n");
+		fflush (stdout);
+	}
+
     // Clean up
     free(even_terms_real);
     free(even_terms_imag);

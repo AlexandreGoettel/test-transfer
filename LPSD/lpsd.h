@@ -25,10 +25,6 @@ static void getDFT2(long int, double, double, double,
 
 // Block approximation
 void calculate_fft_approx(tCFG*, tDATA*);
-void FFT(double*, double*, unsigned int, double*, double*);
-void FFT_control_memory(unsigned long int, unsigned long int, unsigned int,
-                        unsigned long int, struct hdf5_contents*,
-                        struct hdf5_contents*, struct hdf5_contents*);
 
 // Constant Q
 void calculate_constQ_approx(tCFG*, tDATA*);

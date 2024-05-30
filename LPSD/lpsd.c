@@ -506,7 +506,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
                 FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
             } else {
                 // Run memory-controlled FFT
-                FFT_control_memory(Nj0, Nfft, max_samples_in_memory, i_segment*delta_segment,
+                FFT_control_memory(Nj0, Nfft, max_samples_in_memory, false, i_segment*delta_segment,
                                    &contents, &window_contents, &_contents);
                 // Load frequency domain results between j0 and j
                 hsize_t count[2] = {1, jfft_max - jfft_min};
@@ -620,13 +620,13 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	while (remaining_samples > 0) {
 		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
 		else iteration_samples = remaining_samples;
+		// TODO: no need to use full Njo?
 		makewin_indexed(Nj0, memory_unit_index*max_samples_in_memory, iteration_samples, window,
 		                &winsum, &winsum2, &nenbw, memory_unit_index == 0);
 		// Book-keeping
 		remaining_samples -= iteration_samples;
 		memory_unit_index++;
-		double progress = 100. * (double) (Nj0 - remaining_samples) / (double) Nj0;
-		printf ("\b\b\b\b\b\b%5.1f%%", progress);
+		printf ("\b\b\b\b\b\b%5.1f%%", 100. * (double) (Nj0 - remaining_samples) / (double) Nj0);
 		fflush (stdout);
 	}
 	printf ("\b\b\b\b\b\b  100%%\n");
@@ -643,13 +643,12 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	// FFT over the (whole!) data
 	unsigned long int Nfft = get_next_power_of_two(nread);
 	long unsigned int fft_offset = 0;
-	printf("Running data FFT..\n");
 	if (Nfft > max_samples_in_memory) {
 		hsize_t rank = 2;
 		hsize_t dims[2] = {2, Nfft};
 		_contents_ptr = &_contents;
 		open_hdf5_file(_contents_ptr, "tmp.h5", "fft_contents", rank, dims);
-		FFT_control_memory(nread-1, Nfft, max_samples_in_memory, 0,
+		FFT_control_memory(nread-1, Nfft, max_samples_in_memory, true, 0,
 		                   &contents, NULL, _contents_ptr);
 		// Read as much as you can
 		fft_real = (double*) xmalloc(max_samples_in_memory * sizeof(double));
