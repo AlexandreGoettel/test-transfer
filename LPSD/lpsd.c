@@ -609,13 +609,14 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
 
 	// Calculate window normalisation proportionality constant
-	printf("Calculating window normalisation constant..\n");
 	double *window = (double*) xmalloc(max_samples_in_memory * sizeof(double));
 	unsigned long int remaining_samples = Nj0;
 	unsigned int memory_unit_index = 0;
 	unsigned int iteration_samples;
 
 	// Calculate window normalisation
+	printf("Computing window normalisation:  00.0%%");
+    fflush(stdout);
 	while (remaining_samples > 0) {
 		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
 		else iteration_samples = remaining_samples;
@@ -624,7 +625,12 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		// Book-keeping
 		remaining_samples -= iteration_samples;
 		memory_unit_index++;
+		double progress = 100. * (double) (Nj0 - remaining_samples) / (double) Nj0;
+		printf ("\b\b\b\b\b\b%5.1f%%", progress);
+		fflush (stdout);
 	}
+	printf ("\b\b\b\b\b\b  100%%\n");
+	fflush (stdout);
 	xfree(window);
 	double norm_propto_factor = winsum2 / (double) Nj0;
 
@@ -637,6 +643,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	// FFT over the (whole!) data
 	unsigned long int Nfft = get_next_power_of_two(nread);
 	long unsigned int fft_offset = 0;
+	printf("Running data FFT..\n");
 	if (Nfft > max_samples_in_memory) {
 		hsize_t rank = 2;
 		hsize_t dims[2] = {2, Nfft};
@@ -664,7 +671,6 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		read_from_dataset(&contents, offset, count, data_rank, data_count, data_real);
 		FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
 	}
-
 	// Track time and progress
     struct timeval tv;
     printf("Computing output:  00.0%%");
