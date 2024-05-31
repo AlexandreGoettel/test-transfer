@@ -596,6 +596,12 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
 void
 calculate_constQ_approx (tCFG *cfg, tDATA *data)
 {
+	struct timeval tv;
+    gettimeofday(&tv, NULL);
+    double start = tv.tv_sec + tv.tv_usec / 1e6;
+    double now, print, progress;
+    print = now = start;
+
 	// Prepare data file
 	struct hdf5_contents contents;
 	read_hdf5_file(&contents, (*cfg).ifn, (*cfg).dataset_name);
@@ -671,13 +677,8 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		FFT(data_real, data_imag, (int)Nfft, fft_real, fft_imag);
 	}
 	// Track time and progress
-    struct timeval tv;
     printf("Computing output:  00.0%%");
     fflush(stdout);
-    gettimeofday(&tv, NULL);
-    double start = tv.tv_sec + tv.tv_usec / 1e6;
-    double now, print, progress;
-    print = now = start;
 
     // Loop over frequencies
 	for (int j = 0; j < cfg->Jdes; j++) {
