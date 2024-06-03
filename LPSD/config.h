@@ -6,6 +6,7 @@
 #define DEFIFN "p5.txt"		/* lpsd.c	- default input file name */
 #define DEFDSET "strain"    /* lpsd.c   - default dataset name */
 #define DEFOFN "%g-%C-lpsd.txt"	/* lpsd.c	- default output file name */
+#define DEFOFFTFN "fft.h5"	/* lpsd.c 	- default FFT output file name */
 #define DEFGFN "%g-%C-lpsd.gnu"	/* lpsd.c	- default gnuplot filename */
 #define DEFWFN "FFTW-wisdom"	/* lpsd.c	- default FFTW wisdom file name */
 #define DEFWT -2 			/* lpsd.c	- default window type: -2 Kaiser, -1 flat top, or 0..30  */
@@ -74,6 +75,7 @@ typedef struct {
 	unsigned short int askifn;
 	char ofn[FNLEN];	/* output file name */
 	unsigned short int askofn;
+	char offtfn[FNLEN]; /* output FFT file name */
 	char gfn[FNLEN];	/* gnuplot file name */
 	unsigned short int askgfn;
 	char wfn[FNLEN];	/* wisdom file for FFTW */

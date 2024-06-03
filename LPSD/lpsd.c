@@ -454,7 +454,7 @@ calculate_fft_approx (tCFG * cfg, tDATA * data)
             hsize_t rank = 2;  // real + imaginary
             hsize_t dims[2] = {2, Nfft};
             _contents_ptr = &_contents;
-            open_hdf5_file(_contents_ptr, "tmp.h5", "fft_contents", rank, dims);
+            open_hdf5_file(_contents_ptr, cfg->offtfn, "fft_contents", rank, dims);
 
             // Initialise fft output, but only in relevant frequency range
             fft_real = (double*) xmalloc((jfft_max - jfft_min)*sizeof(double));
@@ -653,7 +653,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		hsize_t rank = 2;
 		hsize_t dims[2] = {2, Nfft};
 		_contents_ptr = &_contents;
-		open_hdf5_file(_contents_ptr, "tmp.h5", "fft_contents", rank, dims);
+		open_hdf5_file(_contents_ptr, cfg->offtfn, "fft_contents", rank, dims);
 		FFT_control_memory(nread-1, Nfft, max_samples_in_memory, true, 0,
 		                   &contents, NULL, _contents_ptr);
 		// Read as much as you can

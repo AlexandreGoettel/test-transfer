@@ -46,6 +46,7 @@ static FILE *CFP=0;
 
 static void act_ifn(char*);
 static void act_ofn(char*);
+static void act_offtfn(char*);
 static void act_gfn(char *s);
 static void act_wfn(char *s);
 static void act_wt(char *s);
@@ -75,6 +76,7 @@ static void act_gnuterm(char *s);
 static tPARSEPAIR pplist [] = {
 	{"IFN",		act_ifn},
 	{"OFN",		act_ofn},
+	{"OFFTFN",  act_offtfn},
 	{"GFN",		act_gfn},
 	{"WFN",		act_wfn},
 	{"WT",		act_wt},
@@ -119,6 +121,7 @@ static tCFG cfg={usedefs:0,
 		askifn:1,
 		ofn:DEFOFN,
 		askofn:1,
+		offtfn:DEFOFFTFN,
 		gfn:DEFGFN,
 		wfn:DEFWFN,
 		param:"",
@@ -229,6 +232,10 @@ static void act_ofn(char *s) {
 	getStringValue(&cfg.ofn[0],s);
 	if (s[0]=='?') cfg.askofn=1;
 	else cfg.askofn=0;
+}
+
+static void act_offtfn(char *s) {
+	getStringValue(&cfg.offtfn[0],s);
 }
 
 static void act_gfn(char *s) {
@@ -449,7 +456,6 @@ static void printFiles(char *dest, tCFG cfg) {
 	sprintf(&dest[strlen(dest)],"input: %s\t",cfg.ifn);
 	sprintf(&dest[strlen(dest)],"output: %s\t",cfg.ofn);
 	sprintf(&dest[strlen(dest)],"gnuplot: %s\n",cfg.gfn);
-
 }
 
 static void printWindow(char *dest, tCFG cfg, tWinInfo wi) {

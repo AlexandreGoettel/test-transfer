@@ -23,38 +23,39 @@ static char doc[] = "lpsd - a program to calculate spectral estimates by Michael
 static struct argp_option options[] = {
 	{"davg",    'a', "# of des. avgs", 0, "desired number of averages", 			0},
 	{"colA",    'A', "# of column",    0, "number of column to process",			0},
-	{"tmin",    'b', "tmin", 0, "start time in seconds",					0},
+	{"tmin",    'b', "tmin", 0, "start time in seconds",							0},
 	{"colB",    'B', "# of column",    0, "process column B - column A",			0},	
-	{"param",   'c', "param", 0, "parameter string",					0},
-	{"usedefs", 'd', 0,       0, "use defaults",						0},
-	{"tmax",    'e', "tmax", 0, "stop time in seconds", 					0},
-	{"fsamp",   'f', "sampl. freq.", 0, "sampling frequency in Hertz",			0},
-	{"gnuplot", 'g', "gnuplot file",  0, "gnuplot file name",				0},
-	{"method",  'h', "0, 1",   0, "method for frequency calculation: 0-LPSD, 1-FFT",	0},
-	{"input",   'i', "input file",  0, "input file name",					0},
+	{"param",   'c', "param", 0, "parameter string",								0},
+	{"usedefs", 'd', 0,       0, "use defaults",									0},
+	{"tmax",    'e', "tmax", 0, "stop time in seconds", 							0},
+	{"fsamp",   'f', "sampl. freq.", 0, "sampling frequency in Hertz",				0},
+	{"gnuplot", 'g', "gnuplot file",  0, "gnuplot file name",						0},
+	{"method",  'h', "0, 1",   0, "method for frequency calculation: 0-LPSD, 1-FFT",0},
+	{"input",   'i', "input file",  0, "input file name",							0},
+	{"fft_out",	'O', "fft output file", 0, "fft output file name", 					0},
 	{"dataset_name", 'D', "name of HDF5 dataset containing the data", 0, "name of HDF5 dataset containing the data", 0 },
 	{"fres",    'j', "FFT freq. res.", 0, "Frequency resolution for FFT", 			0},
-	{"sbin",    'k', "sbin", 0, "smallest frequency bin",					0},
-	{"ovlp",    'l', "overlap", 0, "segment overlap in %",	 				0},
+	{"sbin",    'k', "sbin", 0, "smallest frequency bin",							0},
+	{"ovlp",    'l', "overlap", 0, "segment overlap in %",	 						0},
 	{"mavg",    'm', "# of min. avgs", 0, "minimum number of averages", 			0},
 	{"nspec",   'n', "# in spectr.", 0, "number of values in spectrum", 			0},
-	{"output",  'o', "output file",  0, "output file name",					0},
-	{"psll",    'p', "psll", 0, "peak side lobe level in dB", 				0},
-	{"quiet",   'q', 0,       0, "Don't produce output on screen",				0},
-	{"lr",      'r', "0,1",   0, "linear regression; 1 yes, 0 no", 				0},
-	{"fmin",    's', "fmin", 0, "start frequency in spectrum", 				0},
-	{"fmax",    't', "fmax", 0, "stop frequency in spectrum", 				0},
-	{"time",    'T', 0, 0, "file contains time in s in first column",			0},	
-	{"gnuterm", 'u', "gnuterm", 0, "number of gnuplot terminal", 				0},
+	{"output",  'o', "output file",  0, "output file name",							0},
+	{"psll",    'p', "psll", 0, "peak side lobe level in dB", 						0},
+	{"quiet",   'q', 0,       0, "Don't produce output on screen",					0},
+	{"lr",      'r', "0,1",   0, "linear regression; 1 yes, 0 no", 					0},
+	{"fmin",    's', "fmin", 0, "start frequency in spectrum", 						0},
+	{"fmax",    't', "fmax", 0, "stop frequency in spectrum", 						0},
+	{"time",    'T', 0, 0, "file contains time in s in first column",				0},
+	{"gnuterm", 'u', "gnuterm", 0, "number of gnuplot terminal", 					0},
 	{"window",  'w', "wind. func.", 0, "window function; -2 Kaiser, -1 flat top, 0..30",  	0},
-	{"scale",   'x', "factor", 0,"scaling factor",						0},
-	{"iter",    'N', "iteration number", 0, "The current iteration of the run",             0}, 
-	{"Jdes",    'J', "Total frequencies", 0, "The total number of calculated freqs",        0},
+	{"scale",   'x', "factor", 0,"scaling factor",									0},
+	{"iter",    'N', "iteration number", 0, "The current iteration of the run",     0},
+	{"Jdes",    'J', "Total frequencies", 0, "The total number of calculated freqs",0},
 	{"fmin_fft",'F', "FFT fmin", 0, "Minimum frequency to calculate approx at", 	0},
-	{"fmax_fft",'X', "FFT fmax", 0, "Maximum frequency to calculate approx at",	0},
+	{"fmax_fft",'X', "FFT fmax", 0, "Maximum frequency to calculate approx at",		0},
 	{"epsilon", 'E', "epsilon", 0, "Epsilon precision factor for FFT approx in percent.",	0},
 	{"max_mem", 'M', "2^max samples in memory", 0, "n for 2^n maximum samples in memory.",	0},
-	{"constQ_threshold", 'R', "rel. thresh.", 0, "relative constant Q threshold", 0},
+	{"constQ_threshold", 'R', "rel. thresh.", 0, "relative constant Q threshold",	0},
 	{0,0,0,0,0,0}
 };
 
@@ -92,6 +93,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 	case 'i':
 		strcpy(arguments->ifn,arg);
 		arguments->askifn=0;
+		break;
+	case 'O':
+		strcpy(arguments->offtfn,arg);
 		break;
 	case 'D':
 	    strcpy(arguments->dataset_name, arg);
