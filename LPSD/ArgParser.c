@@ -179,7 +179,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		arguments->askulsb=0;
 		break;
 	case 'N':
-		arguments->iter=atof(arg);
+		arguments->iter=atoi(arg);
 		break;
 	case 'F':
 		arguments->fmin_fft=atof(arg);

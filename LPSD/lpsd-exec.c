@@ -291,7 +291,6 @@ void checkParams() {
 int main(int argc, char *argv[])
 {
 	char s[CLEN];
-	/* Wipe previous memory somehow? XhereX */	
 	readConfigFile();
 	getConfig(&cfg);
 	printf("%s",doc);

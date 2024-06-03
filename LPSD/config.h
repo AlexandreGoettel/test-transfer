@@ -32,6 +32,7 @@
 #define DEFMETHOD 0			/* METHOD to calculate frequency METHOD */
 #define DEFFSAMP 1e4		/* lpsd.c	- default sampling frequency */
 #define DEFNSPEC 500		/* lpsd.c	- default number of frequencies in spectrum */
+#define DEFITER 0			/* A reference number to show why step through a parallelised job. */
 
 #define DATADEL " \t\n"		/* IO.c		- delimiters in datafiles: space, tab, and newline *** 28.06.2007 newline added */
 #define DATALEN 1000		/* IO.c		- length of a single line in ASCII data files */
@@ -83,8 +84,8 @@ typedef struct {
 	int WT;				/* window function; -2 Kaiser, -1 flat top, 0..30 */
 	unsigned short int askWT;
 	int LR;				/* 0 no linear regression, 1 perform linear regression */
-	long int nspec;		/* number of samples in spectrum */
-	int iter;			/* A reference number to show why step through a parallelised job. Set to zero for a single job run */
+	int nspec;		/* number of samples in spectrum */
+	int iter;			/* A reference number to show why step through a parallelised job. */
 	unsigned int Jdes;	/* Provides the total number of required frequencies */
 	double epsilon;		/* FFT approx level in percent */
 	double constQ_rel_threshold;  /* relative threshold for const. Q approximation */

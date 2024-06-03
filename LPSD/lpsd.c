@@ -245,23 +245,32 @@ calc_params (tCFG * cfg, tDATA * data)
   long int i, i0, ndft;
 
   g = log ((*cfg).fmax / (*cfg).fmin);
-  i = (*cfg).nspec * (*cfg).iter;
-  i0 = i;
-  f = (*cfg).fmin * exp (i * g / ((*cfg).Jdes - 1.));
-  while (f <= (*cfg).fmax && i / (*cfg).nspec < (*cfg).iter + 1)
-   {
-      fres = f * (exp (g / ((*cfg).Jdes - 1.)) - 1);
-      ndft = round ((*cfg).fsamp / fres);
-      bin = (f / fres);
-      (*data).fspec[i - i0] = f;
-      (*data).nffts[i - i0] = ndft;
-      (*data).bins[i - i0] = bin;
-      i++;
-      f = (*cfg).fmin * exp (i * g / ((*cfg).Jdes - 1.));
+  if (cfg->METHOD == 0 || cfg->METHOD == 1) {
+	i = (*cfg).nspec * (*cfg).iter;
+	i0 = i;
+	f = (*cfg).fmin * exp (i * g / ((*cfg).Jdes - 1.));
+	while (f <= (*cfg).fmax && i / (*cfg).nspec < (*cfg).iter + 1)
+	{
+	  fres = f * (exp (g / ((*cfg).Jdes - 1.)) - 1);
+	  ndft = round ((*cfg).fsamp / fres);
+	  bin = (f / fres);
+	  (*data).fspec[i - i0] = f;
+	  (*data).nffts[i - i0] = ndft;
+	  (*data).bins[i - i0] = bin;
+	  i++;
+	  f = (*cfg).fmin * exp (i * g / ((*cfg).Jdes - 1.));
+	}
+	(*cfg).nspec = i - i0;
+	(*cfg).fmin = (*data).fspec[0];
+	(*cfg).fmax = (*data).fspec[(*cfg).nspec - 1];
   }
-  (*cfg).nspec = i - i0;
-  (*cfg).fmin = (*data).fspec[0];
-  (*cfg).fmax = (*data).fspec[(*cfg).nspec - 1];
+  else
+  {
+  	i0 = cfg->iter;
+  	for (i = cfg->iter; i < cfg->iter + cfg->nspec; i++) {
+  	  data->fspec[i - i0] = (*cfg).fmin * exp (i * g / ((*cfg).Jdes - 1.));
+  	}
+  }
 }
 
 void
@@ -680,10 +689,12 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	// Make sure Nj0 is even
 	unsigned long int Nj0 = round(cfg->fsamp*m/cfg->fmin);
 	Nj0 = (Nj0 % 2) ? Nj0 - 1 : Nj0;
+	// Set window length for calculation as shifted Nj0
+	unsigned long int Nj_window = .5 + (double)Nj0 * pow((double)m / (1 + m), cfg->iter);
 
 	// Calculate window normalisation proportionality constant
 	double *window = (double*) xmalloc(max_samples_in_memory * sizeof(double));
-	unsigned long int remaining_samples = Nj0;
+	unsigned long int remaining_samples = Nj_window;
 	unsigned int memory_unit_index = 0;
 	unsigned int iteration_samples;
 
@@ -693,18 +704,18 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	while (remaining_samples > 0) {
 		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
 		else iteration_samples = remaining_samples;
-		makewin_indexed(Nj0, memory_unit_index*max_samples_in_memory, iteration_samples, window,
+		makewin_indexed(Nj_window, memory_unit_index*max_samples_in_memory, iteration_samples, window,
 		                &winsum, &winsum2, &nenbw, memory_unit_index == 0);
 		// Book-keeping
 		remaining_samples -= iteration_samples;
 		memory_unit_index++;
-		printf ("\b\b\b\b\b\b%5.1f%%", 100. * (double) (Nj0 - remaining_samples) / (double) Nj0);
+		printf ("\b\b\b\b\b\b%5.1f%%", 100. * (double) (Nj_window - remaining_samples) / (double) Nj_window);
 		fflush (stdout);
 	}
 	printf ("\b\b\b\b\b\b  100%%\n");
 	fflush (stdout);
 	xfree(window);
-	double norm_propto_factor = winsum2 / (double) Nj0;
+	double norm_propto_factor = winsum2 / (double) Nj_window;
 
 	// FFT over the (whole!) data - but only if the file exists
 	if (!hdf5_file_exists(cfg->offtfn)) {
@@ -728,7 +739,8 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
     fflush(stdout);
 
     // Loop over frequencies
-	for (int j = 0; j < cfg->Jdes; j++) {
+    if (cfg->iter + cfg->nspec > cfg->Jdes) gerror("\niter + nspec is more than Jdes! Aborting..");
+    for (int j = cfg->iter; j < cfg->iter + cfg->nspec; j++) {
 		// Prepare segment loop parameters
 		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
 		// Make sure Lj is even (tmp?)
@@ -767,7 +779,6 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			fft_offset = (ikernel - delta_i < Nfft - max_samples_in_memory) ? ikernel - delta_i : Nfft - max_samples_in_memory;
 			read_frequency_data(&_contents, fft_offset, max_samples_in_memory, fft_real, fft_imag);
 		}
-
 		// Loop over segments
 		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
 		for (int k = 0; k < n_segments; k++) {
@@ -806,16 +817,14 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			total += (segment_real*segment_real + segment_imag*segment_imag);
 		}
 		total *= pow((double) Lj / (double) Nfft, 2);
-
 		// - Fill data arrays
 		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
-		data->psd[j] = total * norm_psd;
-		data->avg[j] = n_segments;
-		data->bins[j] = 2*delta_i + 1;
-
+		data->psd[j - cfg->iter] = total * norm_psd;
+		data->avg[j - cfg->iter] = n_segments;
+		data->bins[j - cfg->iter] = 2*delta_i + 1;
 		// Progress tracking
 		if (j % 100 == 0) {
-			progress = 100. * (double) j / cfg->Jdes;
+			progress = 100. * (double) (j - cfg->iter)/ cfg->nspec;
 			printf ("\b\b\b\b\b\b%5.1f%%", progress);
 			fflush (stdout);
         }
@@ -847,7 +856,7 @@ calculateSpectrum (tCFG * cfg, tDATA * data)
   ofp = NULL;
 
   // Make sure passed variables are ok
-  if (cfg->n_max_mem >= 31 || cfg->n_max_mem <= 0) gerror("n_max_mem should be smaller than between 1 and 31");
+  if (cfg->n_max_mem >= 31 || cfg->n_max_mem <= 0) gerror("n_max_mem should be between 1 and 31");
   if ((cfg->fmin_fft > 0 && cfg->fmax_fft > 0) && cfg->fmin_fft >= cfg->fmax_fft) gerror("fmin_fft should be smaller than fmax_fft!");
 
   // Run the analysis
