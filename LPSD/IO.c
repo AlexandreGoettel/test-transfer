@@ -269,7 +269,7 @@ static void writeHeaderLine(FILE *ofp, tGNUTERM * gt) {
 			fprintf(ofp, "RBW (Hz)	");
 			break;
 		case 'b':
-			fprintf(ofp, "Bin	");
+			fprintf(ofp, "Delta	");
 			break;
 		case 'r':
 			fprintf(ofp, "Re(PSD)	");

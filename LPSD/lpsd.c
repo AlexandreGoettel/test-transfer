@@ -626,7 +626,6 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	while (remaining_samples > 0) {
 		if (remaining_samples > max_samples_in_memory) iteration_samples = max_samples_in_memory;
 		else iteration_samples = remaining_samples;
-		// TODO: no need to use full Njo?
 		makewin_indexed(Nj0, memory_unit_index*max_samples_in_memory, iteration_samples, window,
 		                &winsum, &winsum2, &nenbw, memory_unit_index == 0);
 		// Book-keeping
@@ -650,6 +649,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	unsigned long int Nfft = get_next_power_of_two(nread);
 	long unsigned int fft_offset = 0;
 	if (Nfft > max_samples_in_memory) {
+		// Perform full-data FFT
 		hsize_t rank = 2;
 		hsize_t dims[2] = {2, Nfft};
 		_contents_ptr = &_contents;
@@ -710,7 +710,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 
 		while (fabs(kernel_val) > ref_kernel * cfg->constQ_rel_threshold) {
 			delta_i++;
-			if (ikernel + delta_i >= Nfft) break;
+			if (ikernel + delta_i >= Nfft) break;  // TODO: Issue warning?
 			kernel_val = get_kernel(ikernel + delta_i, kernel_norm, shifted_m);
 			if (delta_i < max_buffered_kernel_values) kernel_values[delta_i] = kernel_val;
 		}
@@ -764,6 +764,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
 		data->psd[j] = total * norm_psd;
 		data->avg[j] = n_segments;
+		data->bins[j] = 2*delta_i + 1;
 
 		// Progress tracking
 		if (j % 100 == 0) {
