@@ -194,6 +194,35 @@ int exists(char *fn)
 	return (ok);
 }
 
+herr_t silent_error_handler(void *client_data) {
+    // Do nothing and return 0 to indicate that the error was handled
+    return 0;
+}
+
+/* returns 1 if file fn exists and is readable HDF, 0 otherwise */
+int hdf5_file_exists(const char *filename) {
+	// Save the default error handler
+    H5E_auto2_t old_func;
+    void *old_client_data;
+    H5Eget_auto(H5E_DEFAULT, &old_func, &old_client_data);
+
+    // Set the silent error handler
+    H5Eset_auto(H5E_DEFAULT, (H5E_auto2_t)silent_error_handler, NULL);
+
+    // Try to open the file in read-only mode
+    hid_t file_id = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
+
+    // Restore the default error handler
+    H5Eset_auto(H5E_DEFAULT, old_func, old_client_data);
+
+    // Check if the file was successfully opened
+    if (file_id >= 0) {
+        // File exists, close the file and return 1 (true)
+        H5Fclose(file_id);
+        return 1;
+    }
+    return 0;
+}
 
 /********************************************************************************
  *	reads file *fn, counts number of data points and determines mean of data
