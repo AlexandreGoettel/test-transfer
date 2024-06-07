@@ -84,7 +84,7 @@ typedef struct {
 	int WT;				/* window function; -2 Kaiser, -1 flat top, 0..30 */
 	unsigned short int askWT;
 	int LR;				/* 0 no linear regression, 1 perform linear regression */
-	int nspec;		/* number of samples in spectrum */
+	long int nspec;		/* number of samples in spectrum */
 	int iter;			/* A reference number to show why step through a parallelised job. */
 	unsigned int Jdes;	/* Provides the total number of required frequencies */
 	double epsilon;		/* FFT approx level in percent */
