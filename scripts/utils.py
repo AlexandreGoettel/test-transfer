@@ -10,7 +10,7 @@ class LPSDVars:
             fmin, fmax, resolution, fs, epsilon
         # Derived variables
         self.g = np.log(fmax) - np.log(fmin)
-        self.Jdes = int(2 + self.g / np.log(1. + self.resolution))
+        self.Jdes = int(1 + self.g / np.log(1. + self.resolution))
 
     def N(self, j):
         """Get the segment length at bin position j."""
