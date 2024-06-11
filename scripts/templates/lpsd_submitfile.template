@@ -2,14 +2,20 @@ Universe = vanilla
 Executable = $run_file
 Arguments = $(Process)
 
-request_cpus = $request_cpus
 accounting_group = $accounting_group
 accounting_group_user = $accounting_group_user
+request_cpus = $request_cpus
 request_disk = $request_disk_GB GB
 request_memory = $request_memory_GB GB
 
-Output = ${outdir}/lpsd.out
-Error = ${outdir}/lpsd.err
-Log = ${outdir}/lpsd.log
+should_transfer_files = NO
++DESIRED_Sites = "nogrid"
++flock_local = True
+
+Output = ${outdir}/$prefix.out
+Error = ${outdir}/$prefix.err
+Log = ${outdir}/$prefix.log
+stream_out = True
+stream_error = True
 
 Queue $n_batches
