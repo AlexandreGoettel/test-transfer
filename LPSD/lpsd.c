@@ -652,7 +652,7 @@ calculate_constQ_FFT (tCFG *cfg, tDATA *data)
 		// Save to HDF
 		hsize_t _offset[2] = {0, 0};
 		hsize_t _count[2] = {1, Nfft};
-		count[0] = Nfft;
+		data_count[0] = Nfft;
 		write_to_hdf5(&_contents, fft_real, _offset, _count, data_rank, data_count);
 		_offset[0] = 1;
 		write_to_hdf5(&_contents, fft_imag, _offset, _count, data_rank, data_count);
@@ -676,12 +676,6 @@ calculate_constQ_FFT (tCFG *cfg, tDATA *data)
 void
 calculate_constQ_approx (tCFG *cfg, tDATA *data)
 {
-	struct timeval tv;
-    gettimeofday(&tv, NULL);
-    double start = tv.tv_sec + tv.tv_usec / 1e6;
-    double now, print, progress;
-    print = now = start;
-
 	// ###### START ANALYSIS ###### //
 	double g = log(cfg->fmax / cfg->fmin);
 	int m = round(1. / (exp(g / (cfg->Jdes - 1.)) - 1.));  // m as an integer!
@@ -735,6 +729,11 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	read_frequency_data(&_contents, fft_offset, n_read_FFT, fft_real, fft_imag);
 
 	// Track time and progress
+	struct timeval tv;
+    gettimeofday(&tv, NULL);
+    double start = tv.tv_sec + tv.tv_usec / 1e6;
+    double now, print, progress;
+    print = now = start;
     printf("Computing output:  00.0%%");
     fflush(stdout);
 

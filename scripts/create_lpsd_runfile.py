@@ -21,6 +21,8 @@ def parse_args():
                            help="Path to run file.")
     LPSD_args.add_argument("--path-to-lpsd-exec", type=str, default="lpsd-exec",
                            help="Path to LPSD executable.")
+    LPSD_args.add_argument("--fft-file", type=str, default="fft.h5",
+                           help="Path to FFT results.")
     LPSD_args.add_argument("--channel", type=str, default=None,
                            help="Dataset within the hdf5 file. Defaults to" +
                            " X1:GDS-CALIB_STRAIN_CLEAN where X is the input file's first char.")
@@ -40,6 +42,10 @@ def parse_args():
                            help="epsilon factor for block approximation in percent. (default: 10)")
     LPSD_args.add_argument("--max-memory-power", type=int, default=26,
                            help="2^n is maximum array length for memory management. (default 26)")
+    LPSD_args.add_argument("--n-batches", type=int, default=1,
+                           help="if > 1 then launch jobs in parallel fashion.")
+    LPSD_args.add_argument("--method", type=int, choices=[1, 2, 3], default=2,
+                           help="1 for block, 2 for constQ, 3 for constQ FFT-only.")
 
     condor_parser = parser.add_argument_group("Condor args")
     condor_parser.add_argument("--use-condor", action="store_true")
@@ -63,6 +69,27 @@ def write_template(args, infile, outfile):
         contents = _f.read()
     with open(outfile, "w") as _f:
         _f.write(Template(contents).safe_substitute(args))
+
+
+def exponential_separator(Jdes, n_batches, theta=2e-4):
+    """Generate exponentially-distanced iteration start points for given Jdes, n_batches."""
+    # Recursive answer
+    a, b = np.zeros(n_batches - 1), np.zeros(n_batches - 1)
+    a[0], b[0] = 0.5, 0.5
+    for i in range(1, n_batches - 1):
+        a[i], b[i] = 1 / (2 - a[i - 1]), b[i - 1] / (2 - a[i - 1])
+
+    # Now reverse solve
+    N = np.zeros(n_batches)
+    N[-1] = Jdes
+
+    for i in range(n_batches - 2, -1, -1):
+        if theta*Jdes <= 700:
+            N[i] = np.log(a[i]*np.exp(theta*N[i+1]) + b[i]) / theta
+        else:
+            N[i] = N[i+1] + np.log(a[i]) / theta
+
+    return N
 
 
 def main(args):
@@ -95,6 +122,13 @@ def main(args):
     if args["data_length"] < 1 / (args["fmin"] * args["resolution"]):
         _fmin = int(np.ceil(1. / (args["data_length"] * args["resolution"])))
         raise ValueError(f"Insufficient data length\nUnder current settings, try fmin >= {_fmin}")
+
+    if args["n_batches"] == 1:
+        args["index_string"] = f"(0 {args['Jdes']})"
+    else:
+        _str = " ".join(map(lambda x: str(int(x)),
+                            exponential_separator(args["Jdes"], args["n_batches"])))
+        args["index_string"] = f"(0 {_str})"
 
     # Write the run file based on the template
     write_template(args,

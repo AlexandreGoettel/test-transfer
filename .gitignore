@@ -9,7 +9,6 @@ tmp*
 LPSD/CMakeFiles/*
 LPSD/Makefile
 LPSD/*.cmake
-scripts/*
 archive/*
 data/*
 __pycache__/*

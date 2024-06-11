@@ -1,5 +1,6 @@
 Universe = vanilla
 Executable = $run_file
+Arguments = $(Process)
 
 request_cpus = $request_cpus
 accounting_group = $accounting_group
@@ -11,4 +12,4 @@ Output = ${outdir}/lpsd.out
 Error = ${outdir}/lpsd.err
 Log = ${outdir}/lpsd.log
 
-Queue 1
+Queue $n_batches
