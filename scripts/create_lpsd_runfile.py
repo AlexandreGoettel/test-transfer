@@ -143,6 +143,7 @@ def main(args):
     # Write a condor submit file
     if not args["use_condor"]:
         return
+    args["prefix"] = os.path.splitext(os.path.split(args["output_file"])[-1])[0]
     write_template(args,
                    os.path.join(BASE_PATH, "templates/lpsd_submitfile.template"),
                    args["submit_file"]

@@ -12,9 +12,9 @@ should_transfer_files = NO
 +DESIRED_Sites = "nogrid"
 +flock_local = True
 
-Output = ${outdir}/$prefix.out
-Error = ${outdir}/$prefix.err
-Log = ${outdir}/$prefix.log
+Output = ${outdir}/$prefix.out.$(Process)
+Error = ${outdir}/$prefix.err.$(Process)
+Log = ${outdir}/$prefix.log.$(Process)
 stream_out = True
 stream_error = True
 

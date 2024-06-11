@@ -28,7 +28,7 @@ iter=${indices[$1]}
 batch_size=$((${indices[$1 + 1]} - ${indices[$1]}))
 
 # Declare the output file
-outfilename=$output_file
+outfilename=$output_file.$1
 
 $path_to_lpsd_exec \
 	-A 2 \
