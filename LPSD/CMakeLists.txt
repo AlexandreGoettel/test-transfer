@@ -59,7 +59,7 @@ SET(HEADERS
 add_executable(${EXENAME} ${SOURCE} ${HEADERS})
 
 # Link & install
-target_link_libraries(${EXENAME} PRIVATE HDF5::HDF5 GSL::gsl GSL::gslcblas)# PkgConfig::FFTW)
+target_link_libraries(${EXENAME} PRIVATE HDF5::HDF5 GSL::gsl GSL::gslcblas)
 target_include_directories(${EXENAME} PRIVATE ${INCLUDEPATH})
 INSTALL(TARGETS ${EXENAME} DESTINATION bin)
 
