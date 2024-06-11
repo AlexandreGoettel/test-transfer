@@ -8,6 +8,9 @@ import h5py
 from utils import LPSDVars
 
 
+BASE_PATH = os.path.dirname(__file__)
+
+
 def parse_args():
     """Gather dict of cmdl-args parser output."""
     parser = argparse.ArgumentParser()
@@ -67,6 +70,7 @@ def write_template(args, infile, outfile):
     with open(os.path.join(os.path.split("__file__")[0],
                            infile), "r") as _f:
         contents = _f.read()
+    print(f"Writing to '{outfile}'..")
     with open(outfile, "w") as _f:
         _f.write(Template(contents).safe_substitute(args))
 
@@ -132,7 +136,7 @@ def main(args):
 
     # Write the run file based on the template
     write_template(args,
-                   "templates/lpsd_config.template",
+                   os.path.join(BASE_PATH, "templates/lpsd_config.template"),
                    args["run_file"]
                    )
 
@@ -140,7 +144,7 @@ def main(args):
     if not args["use_condor"]:
         return
     write_template(args,
-                   "templates/lpsd_submitfile.template",
+                   os.path.join(BASE_PATH, "templates/lpsd_submitfile.template"),
                    args["submit_file"]
                    )
 
