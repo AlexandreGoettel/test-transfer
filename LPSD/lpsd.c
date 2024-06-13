@@ -742,6 +742,8 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
     if (cfg->iter + cfg->nspec > cfg->Jdes) gerror("\niter + nspec is more than Jdes! Aborting..");
     int max_buffered_kernel_values = 10000;
     double* kernel_values = (double*) xmalloc(max_buffered_kernel_values * sizeof(double));
+    double* negative_kernel_values = (double*) xmalloc(max_buffered_kernel_values * sizeof(double));
+
     for (int j = cfg->iter; j < cfg->iter + cfg->nspec; j++) {
 		// Prepare segment loop parameters
 		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
@@ -764,14 +766,17 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		double kernel_val = ref_kernel;
 
 		// Get delta_i
-		unsigned long int delta_i = 0;
+		long int delta_i = 0;
 		kernel_values[0] = get_kernel((double)ikernel, kernel_norm, shifted_m);
 
 		while (fabs(kernel_val) > ref_kernel * cfg->constQ_rel_threshold) {
 			delta_i++;
 			if (ikernel + delta_i >= Nfft) break;  // TODO: Issue warning?
 			kernel_val = get_kernel(ikernel + delta_i, kernel_norm, shifted_m);
-			if (delta_i < max_buffered_kernel_values) kernel_values[delta_i] = kernel_val;
+			if (delta_i < max_buffered_kernel_values) {
+				kernel_values[delta_i] = kernel_val;
+				negative_kernel_values[delta_i] = get_kernel(ikernel - delta_i, kernel_norm, shifted_m);
+			}
 		}
 
 		if (ikernel + delta_i >= fft_offset + max_samples_in_memory) {
@@ -785,33 +790,22 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			// Sum over +- delta_i & normalise
 			segment_real = 0;
 			segment_imag = 0;
-			for (unsigned long int _delta_i = 0; _delta_i <= delta_i; _delta_i++) {
+			for (long int _delta_i = -delta_i; _delta_i <= delta_i; _delta_i++) {
 				// Adjust data location by multiplying exp's to the spectral terms
 				unsigned long int i_fft = ikernel + _delta_i;
 				exp_factor = -2*M_PI*(double)i_fft*inverse_Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
 
-				if (_delta_i >= max_buffered_kernel_values)
-					get_kernel(i_fft, kernel_norm, shifted_m);
-				else
+				if (fabs(_delta_i) >= max_buffered_kernel_values)
+					kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
+				else if (_delta_i >= 0)
 					kernel_val = kernel_values[_delta_i];
+				else
+					kernel_val = negative_kernel_values[-_delta_i];
 				sign = i_fft % 2 ? -1 : +1;
 
 				// Complex multiplication
-				segment_real += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
-				segment_imag += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
-
-				// Now the other side
-				if (_delta_i == 0 || ikernel - _delta_i < 1) continue;
-				i_fft = ikernel - _delta_i;
-				exp_factor = -2*M_PI*(double)i_fft*inverse_Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
-				shift_real = cos(exp_factor);
-				shift_imag = sin(exp_factor);
-
-				// I have to re-calculate the kernel_val here because the rounding of the indices makes the kernel slightly asymmetric
-				// TODO: well then this is pointless?
-				kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
 				segment_real += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
 				segment_imag += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
 			}
@@ -836,6 +830,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	xfree(fft_imag);
     close_hdf5_contents(&_contents);
     xfree(kernel_values);
+    xfree(negative_kernel_values);
 
 	// Finish
     printf ("\b\b\b\b\b\b  100%%\n");
