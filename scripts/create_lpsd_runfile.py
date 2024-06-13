@@ -13,7 +13,7 @@ BASE_PATH = os.path.dirname(__file__)
 
 def parse_args():
     """Gather dict of cmdl-args parser output."""
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     LPSD_args = parser.add_argument_group("LPSD args")
     LPSD_args.add_argument("--input-file", type=str, required=True,
