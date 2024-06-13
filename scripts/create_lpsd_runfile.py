@@ -75,7 +75,7 @@ def write_template(args, infile, outfile):
         _f.write(Template(contents).safe_substitute(args))
 
 
-def exponential_separator(Jdes, n_batches, theta=2e-4):
+def exponential_separator(Jdes, n_batches, theta=2e-6):
     """Generate exponentially-distanced iteration start points for given Jdes, n_batches."""
     # Recursive answer
     a, b = np.zeros(n_batches - 1), np.zeros(n_batches - 1)
