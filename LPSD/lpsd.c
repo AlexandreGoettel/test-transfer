@@ -718,6 +718,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 
 	// Read from the FFT results
 	unsigned long int Nfft = get_next_power_of_two(nread);
+	double inverse_Nfft = 1. / Nfft;
 	long unsigned int fft_offset = 0;
 	struct hdf5_contents _contents;
 	read_hdf5_file(&_contents, cfg->offtfn, "fft_contents");
@@ -739,6 +740,8 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 
     // Loop over frequencies
     if (cfg->iter + cfg->nspec > cfg->Jdes) gerror("\niter + nspec is more than Jdes! Aborting..");
+    int max_buffered_kernel_values = 10000;
+    double* kernel_values = (double*) xmalloc(max_buffered_kernel_values * sizeof(double));
     for (int j = cfg->iter; j < cfg->iter + cfg->nspec; j++) {
 		// Prepare segment loop parameters
 		unsigned long int Lj = round(cfg->fsamp * m / (cfg->fmin * exp(j*g/(cfg->Jdes - 1))));
@@ -752,18 +755,16 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 
 		// Initialise segment loop vars
 		double shifted_m = (double) m * (Lj - 1) / (double) Lj;
-		double kernel_norm = (Lj - 1) / (double)Nfft;
+		double kernel_norm = (Lj - 1) * inverse_Nfft;
 		// Get position in FFT bin freq
 		double search_freq = cfg->fsamp * m / (double)Lj;  // Position of spectral peak in Hz
-		double fft_resolution = (double) cfg->fsamp / (double) Nfft;
+		double fft_resolution = (double) cfg->fsamp * inverse_Nfft;
 		unsigned long int ikernel = round(search_freq / fft_resolution);
 		double ref_kernel = get_kernel(ikernel, kernel_norm, shifted_m);
 		double kernel_val = ref_kernel;
 
 		// Get delta_i
 		unsigned long int delta_i = 0;
-		int max_buffered_kernel_values = 500;
-		double kernel_values[max_buffered_kernel_values];
 		kernel_values[0] = get_kernel((double)ikernel, kernel_norm, shifted_m);
 
 		while (fabs(kernel_val) > ref_kernel * cfg->constQ_rel_threshold) {
@@ -787,7 +788,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			for (unsigned long int _delta_i = 0; _delta_i <= delta_i; _delta_i++) {
 				// Adjust data location by multiplying exp's to the spectral terms
 				unsigned long int i_fft = ikernel + _delta_i;
-				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+				exp_factor = -2*M_PI*(double)i_fft*inverse_Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
 
@@ -804,18 +805,19 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 				// Now the other side
 				if (_delta_i == 0 || ikernel - _delta_i < 1) continue;
 				i_fft = ikernel - _delta_i;
-				exp_factor = -2*M_PI*(double)i_fft/(double)Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+				exp_factor = -2*M_PI*(double)i_fft*inverse_Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
 
 				// I have to re-calculate the kernel_val here because the rounding of the indices makes the kernel slightly asymmetric
+				// TODO: well then this is pointless?
 				kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
 				segment_real += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
 				segment_imag += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
 			}
 			total += (segment_real*segment_real + segment_imag*segment_imag);
 		}
-		total *= pow((double) Lj / (double) Nfft, 2);
+		total *= pow((double) Lj * inverse_Nfft, 2);
 		// - Fill data arrays
 		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
 		data->psd[j - cfg->iter] = total * norm_psd;
@@ -833,6 +835,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 	xfree(fft_real);
 	xfree(fft_imag);
     close_hdf5_contents(&_contents);
+    xfree(kernel_values);
 
 	// Finish
     printf ("\b\b\b\b\b\b  100%%\n");
