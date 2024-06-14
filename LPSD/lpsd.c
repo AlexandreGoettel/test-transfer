@@ -786,14 +786,17 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		}
 		// Loop over segments
 		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
+		double pre_factor_left = -2*M_PI * inverse_Nfft;
+		double pre_factor_right = 0.5*(Nfft - Lj);
+		unsigned long int i_fft;
 		for (int k = 0; k < n_segments; k++) {
 			// Sum over +- delta_i & normalise
 			segment_real = 0;
 			segment_imag = 0;
 			for (long int _delta_i = -delta_i; _delta_i <= delta_i; _delta_i++) {
 				// Adjust data location by multiplying exp's to the spectral terms
-				unsigned long int i_fft = ikernel + _delta_i;
-				exp_factor = -2*M_PI*(double)i_fft*inverse_Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+				i_fft = ikernel + _delta_i;
+				exp_factor = (double)i_fft * pre_factor_left * (pre_factor_right - k*delta_segment);
 				shift_real = cos(exp_factor);
 				shift_imag = sin(exp_factor);
 
