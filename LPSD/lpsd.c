@@ -784,33 +784,69 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			fft_offset = (ikernel - delta_i < Nfft - max_samples_in_memory) ? ikernel - delta_i : Nfft - max_samples_in_memory;
 			read_frequency_data(&_contents, fft_offset, max_samples_in_memory, fft_real, fft_imag);
 		}
-		// Loop over segments
-		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
+
+		// Loop over delta_i & segments
+		double segment_imag[n_segments], segment_real[n_segments], exp_segment_term[n_segments];
 		for (int k = 0; k < n_segments; k++) {
-			// Sum over +- delta_i & normalise
-			segment_real = 0;
-			segment_imag = 0;
-			for (long int _delta_i = -delta_i; _delta_i <= delta_i; _delta_i++) {
-				// Adjust data location by multiplying exp's to the spectral terms
-				unsigned long int i_fft = ikernel + _delta_i;
-				exp_factor = -2*M_PI*(double)i_fft*inverse_Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
-				shift_real = cos(exp_factor);
-				shift_imag = sin(exp_factor);
-
-				if (fabs(_delta_i) >= max_buffered_kernel_values)
-					kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
-				else if (_delta_i >= 0)
-					kernel_val = kernel_values[_delta_i];
-				else
-					kernel_val = negative_kernel_values[-_delta_i];
-				sign = i_fft % 2 ? -1 : +1;
-
-				// Complex multiplication
-				segment_real += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
-				segment_imag += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
-			}
-			total += (segment_real*segment_real + segment_imag*segment_imag);
+			exp_segment_term[k] = 0.5*(Nfft - Lj) - k*delta_segment;
+			segment_imag[k] = segment_real[k] = 0;
 		}
+		double sign, shift_real, shift_imag, exp_factor, _exp_factor;
+		unsigned long int i_fft;
+		for (long int _delta_i = -delta_i; _delta_i <= delta_i; _delta_i++) {
+			i_fft = ikernel + _delta_i;
+			// Adjust data location by multiplying exp's to the spectral terms
+			exp_factor = -2*M_PI * inverse_Nfft * (double)i_fft;
+
+			if (fabs(_delta_i) >= max_buffered_kernel_values)
+				kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
+			else if (_delta_i >= 0)
+				kernel_val = kernel_values[_delta_i];
+			else
+				kernel_val = negative_kernel_values[-_delta_i];
+			sign = i_fft % 2 ? -1 : +1;
+
+			for (int k = 0; k < n_segments; k++) {
+				_exp_factor = exp_factor * exp_segment_term[k];;
+				shift_real = cos(_exp_factor);
+				shift_imag = sin(_exp_factor);
+				segment_real[k] += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
+				segment_imag[k] += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
+			}
+		}
+		double total = 0;
+		for (int k = 0; k < n_segments; k++) {
+			double real = segment_real[k];
+			double imag = segment_imag[k];
+			total += real*real + imag*imag;
+		}
+// 		// Loop over segments
+//		double total = 0, segment_real, segment_imag, fft_freq, sign, shift_real, shift_imag, exp_factor;
+//		for (int k = 0; k < n_segments; k++) {
+//			// Sum over +- delta_i & normalise
+//			segment_real = 0;
+//			segment_imag = 0;
+//			for (long int _delta_i = -delta_i; _delta_i <= delta_i; _delta_i++) {
+//				// Adjust data location by multiplying exp's to the spectral terms
+//				unsigned long int i_fft = ikernel + _delta_i;
+//				exp_factor = -2*M_PI*(double)i_fft*inverse_Nfft*(double)(0.5*(Nfft - Lj) - k*delta_segment);
+//				shift_real = cos(exp_factor);
+//				shift_imag = sin(exp_factor);
+//
+//				if (fabs(_delta_i) >= max_buffered_kernel_values)
+//					kernel_val = get_kernel(i_fft, kernel_norm, shifted_m);
+//				else if (_delta_i >= 0)
+//					kernel_val = kernel_values[_delta_i];
+//				else
+//					kernel_val = negative_kernel_values[-_delta_i];
+//				sign = i_fft % 2 ? -1 : +1;
+//
+//				// Complex multiplication
+//				segment_real += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_real - fft_imag[i_fft - fft_offset]*shift_imag);
+//				segment_imag += kernel_val*sign * (fft_real[i_fft - fft_offset]*shift_imag + fft_imag[i_fft - fft_offset]*shift_real);
+//			}
+//			total += (segment_real*segment_real + segment_imag*segment_imag);
+//		}
 		total *= pow((double) Lj * inverse_Nfft, 2);
 		// - Fill data arrays
 		double norm_psd = 2. / ((double)n_segments * cfg->fsamp * norm_propto_factor * (double)Lj);
