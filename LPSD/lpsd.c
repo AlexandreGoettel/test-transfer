@@ -765,10 +765,9 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 		double ref_kernel = get_kernel(ikernel, kernel_norm, shifted_m);
 		double kernel_val = ref_kernel;
 
-		// Get delta_i
+		// Get delta_i and buffer evaluated kernel values
 		long int delta_i = 0;
-		kernel_values[0] = get_kernel((double)ikernel, kernel_norm, shifted_m);
-
+		kernel_values[0] = ref_kernel;
 		while (fabs(kernel_val) > ref_kernel * cfg->constQ_rel_threshold) {
 			delta_i++;
 			if (ikernel + delta_i >= Nfft) break;  // TODO: Issue warning?
@@ -779,7 +778,7 @@ calculate_constQ_approx (tCFG *cfg, tDATA *data)
 			}
 		}
 
-		if (ikernel + delta_i >= fft_offset + max_samples_in_memory) {
+		if (ikernel + delta_i >= fft_offset + max_samples_in_memory || ikernel - delta_i < fft_offset) {
 			// Shift memory space over different disk space window
 			fft_offset = (ikernel - delta_i < Nfft - max_samples_in_memory) ? ikernel - delta_i : Nfft - max_samples_in_memory;
 			read_frequency_data(&_contents, fft_offset, max_samples_in_memory, fft_real, fft_imag);
