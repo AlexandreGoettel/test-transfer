@@ -338,7 +338,7 @@ static void writeData(FILE *ofp, tCFG * cfg, tDATA * data, tGNUTERM * gt) {
 	int i;
 	unsigned int c;
 	
-	for (i = 0; i < (*cfg).nspec-1; i++) {
+	for (i = 0; i < (*cfg).nspec; i++) {
 		for (c = 0; c < strlen((*gt).fmt); c++) {
 			switch ((*gt).fmt[c]) {
 			case 'f':
