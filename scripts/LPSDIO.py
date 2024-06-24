@@ -31,18 +31,13 @@ def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
     if filepath is None:
         assert all([x is not None for x in [t0, t1, ifo]])
         return f"{prefix}_{t0}_{t1}_{ifo}"
-                           )
-
-    def save_to_hdf5(self, filename, dset="logPSD", dset_freq="frequency"):
-        """Save (log)PSD data to HDF5."""
-        tqdm.write(f"Writing data to: '{filename}'..")
-        with h5py.File(filename, "w") as _file:
-    def __init__(self, filename, delimiter="\t"):
-            _file.create_dataset(dset, data=self.logPSD)
-            _file[dset].attrs.update(self.kwargs)
+    else:
         main, _ = os.path.splitext(os.path.split(filepath)[-1])
         body = "_".join(main.split("_")[-3:])
-        assert self.kwargs
+        return f"{prefix}_{body}"
+
+
+def sep_label(filepath):
     """Extract timestamp and ifo from LPSD output filepath."""
     t0, t1, ifo = os.path.splitext(os.path.split(filepath)[-1])[0].split("_")[-3:]
     return t0, t1, ifo
@@ -51,11 +46,10 @@ def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
 class LPSDJSONIO:
     """Read/Write from JSON files."""
 
-            raw_freq, psd = self.read(raw_freq=True, delimiter=delimiter)
+    def __init__(self, filename):
+        self.filename = filename
         self.data = None
         self.update_data()
-            self.freq = self.freq_from_kwargs() if len(self.logPSD) == int(self.kwargs["Jdes"])\
-                else raw_freq[:len(self.logPSD)]
 
     def update_data(self):
         with open(self.filename, "r") as _file:
@@ -194,29 +188,34 @@ class LPSDData:
                            int(self.kwargs["Jdes"])
                            )
 
+    def save_to_hdf5(self, filename, dset="logPSD", dset_freq="frequency"):
+        """Save (log)PSD data to HDF5."""
+        tqdm.write(f"Writing data to: '{filename}'..")
+        with h5py.File(filename, "w") as _file:
+            _file.create_dataset(dset_freq, data=self.freq)
+            _file.create_dataset(dset, data=self.logPSD)
+            _file[dset].attrs.update(self.kwargs)
+
 
 class LPSDOutput(LPSDData):
     """Extend LPSDData with functionality to read from an output file."""
 
-    def __init__(self, filename):
+    def __init__(self, filename, delimiter="\t"):
         self.filename = filename
         is_hdf5 = filename.endswith(".h5") or filename.endswith(".hdf5")
         self.kwargs = self.get_lpsd_kwargs_hdf5() if is_hdf5 else self.get_lpsd_kwargs()
         # Check that file is valid
         assert self.kwargs
-        # This function is only meant to process complete files
-        if "batch" in self.kwargs:
-            assert self.kwargs["Jdes"] == self.kwargs["batch"]
 
         # Get logPSD data from file
         if is_hdf5:
             self.freq, self.logPSD = self.read_hdf5()
         else:
-            raw_freq, psd = self.read(raw_freq=True)
+            raw_freq, psd = self.read(raw_freq=True, delimiter=delimiter)
             # Protection against (old) LPSD bug
             self.logPSD = np.log(psd[:-1]) if psd[-1] == 0 else np.log(psd)
             self.freq = self.freq_from_kwargs() if len(self.logPSD) == int(self.kwargs["Jdes"])\
-                else raw_freq
+                else raw_freq[:len(self.logPSD)]
 
         super().__init__(self.logPSD, freq=self.freq, **self.kwargs)
 
