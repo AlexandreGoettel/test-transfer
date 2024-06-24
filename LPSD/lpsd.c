@@ -17,7 +17,6 @@
 #include <string.h>
 #include <time.h>
 #include <assert.h>
-#include <fftw3.h>
 #include "hdf5.h"
 
 #include "config.h"

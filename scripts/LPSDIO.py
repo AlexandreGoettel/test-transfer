@@ -31,13 +31,18 @@ def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
     if filepath is None:
         assert all([x is not None for x in [t0, t1, ifo]])
         return f"{prefix}_{t0}_{t1}_{ifo}"
-    else:
+                           )
+
+    def save_to_hdf5(self, filename, dset="logPSD", dset_freq="frequency"):
+        """Save (log)PSD data to HDF5."""
+        tqdm.write(f"Writing data to: '{filename}'..")
+        with h5py.File(filename, "w") as _file:
+    def __init__(self, filename, delimiter="\t"):
+            _file.create_dataset(dset, data=self.logPSD)
+            _file[dset].attrs.update(self.kwargs)
         main, _ = os.path.splitext(os.path.split(filepath)[-1])
         body = "_".join(main.split("_")[-3:])
-        return f"{prefix}_{body}"
-
-
-def sep_label(filepath):
+        assert self.kwargs
     """Extract timestamp and ifo from LPSD output filepath."""
     t0, t1, ifo = os.path.splitext(os.path.split(filepath)[-1])[0].split("_")[-3:]
     return t0, t1, ifo
@@ -46,10 +51,11 @@ def sep_label(filepath):
 class LPSDJSONIO:
     """Read/Write from JSON files."""
 
-    def __init__(self, filename):
-        self.filename = filename
+            raw_freq, psd = self.read(raw_freq=True, delimiter=delimiter)
         self.data = None
         self.update_data()
+            self.freq = self.freq_from_kwargs() if len(self.logPSD) == int(self.kwargs["Jdes"])\
+                else raw_freq[:len(self.logPSD)]
 
     def update_data(self):
         with open(self.filename, "r") as _file:
