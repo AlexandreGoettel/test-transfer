@@ -99,6 +99,9 @@ class LPSDDataGroup:
 
         self.freq, self.logPSD, self.metadata = self.read_all_data(files)
 
+    def __len__(self):
+        return len(self.freq)
+
     def create_buffer_path(self, data_path, suffix=".h5"):
         """Create path based on data_path to store interim HDF data for fast retrieval."""
         loc, body = os.path.split(data_path)
