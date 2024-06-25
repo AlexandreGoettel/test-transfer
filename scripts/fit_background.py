@@ -213,12 +213,12 @@ def bayesian_regularized_linreg(
 def process_iteration(args):
     """Wrap BIC-minimising bkg. fit."""
     i, x, y, kwargs = args
-    kernel_size, plot_mean, verbose, plot_path = list(map(
-        kwargs.pop, ["kernel_size", "plot_mean", "verbose", "plot_path"]))
+    kernel_size, plot_mean, verbose, plot_path, plot_prefix = list(map(
+        kwargs.pop, ["kernel_size", "plot_mean", "verbose", "plot_path", "plot_prefix"]))
     if verbose:
         prefix = f"{np.exp(x[0]):.3f}_{np.exp(x[-1]):.3f}_Hz"
         try:
-            plot_path = os.path.join(plot_path, f"{prefix}.png")
+            plot_path = os.path.join(plot_path, f"{plot_prefix}_{prefix}.png")
         except TypeError as err:
             print("[ERROR] You need to specify a plot_path if verbose is True.")
             raise err
@@ -300,7 +300,16 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
     if not os.path.exists(data_path):
         print(f"[ERROR] The file '{data_path}' does not exist, aborting..")
         raise ValueError
+    mngr = LPSDJSONIO(output_path)
+    try:
+        mngr.get_df(mngr.get_label(data_path))
+    except IOError:
+        pass
+    else:
+        print(f"Skipping '{data_path}'")
+        return
     data = LPSDOutput(data_path)
+    kwargs["plot_prefix"] = os.path.splitext(os.path.split(data_path)[-1])[0]
 
     # Start parallel BIC-based calculation
     idx_start = np.where(data.freq >= ana_fmin)[0][0]
@@ -346,7 +355,6 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
              "chi_sqr": chi
              })])
 
-    mngr = LPSDJSONIO(output_path)
     mngr.update_file(data_path, df)
 
 

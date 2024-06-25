@@ -26,17 +26,6 @@ def get_A_star(tf_path):
     return f_A_star
 
 
-def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
-    """Get simple df label from filepath."""
-    if filepath is None:
-        assert all([x is not None for x in [t0, t1, ifo]])
-        return f"{prefix}_{t0}_{t1}_{ifo}"
-    else:
-        main, _ = os.path.splitext(os.path.split(filepath)[-1])
-        body = "_".join(main.split("_")[-3:])
-        return f"{prefix}_{body}"
-
-
 def sep_label(filepath):
     """Extract timestamp and ifo from LPSD output filepath."""
     t0, t1, ifo = os.path.splitext(os.path.split(filepath)[-1])[0].split("_")[-3:]
@@ -52,20 +41,18 @@ class LPSDJSONIO:
         self.update_data()
 
     def update_data(self):
-        with open(self.filename, "r") as _file:
-            self.data = json.load(_file)
+        """Read data contents from JSON file."""
+        if os.path.exists(self.filename):
+            with open(self.filename, "r") as _file:
+                self.data = json.load(_file)
+        else:
+            self.data = {}
 
     def update_file(self, name, df, orient="records"):
         """Write data to the JSON file, give it reference "name"."""
-        data = {}
-        if os.path.exists(self.filename):
-            with open(self.filename, "r") as _file:
-                data = json.load(_file)
-
-        # Update data with dataframe contents & save
-        data[get_label(name)] = df.to_json(orient=orient)
+        self.data[self.get_label(name)] = df.to_json(orient=orient)
         with open(self.filename, "w") as _file:
-            json.dump(data, _file)
+            json.dump(self.data, _file)
         self.update_data()
 
     def get_df(self, name):
@@ -73,14 +60,25 @@ class LPSDJSONIO:
         if not os.path.exists(self.filename):
             raise IOError(f"File '{self.filename}' does not exist..")
 
-        with open(self.filename, 'r') as file:
-            data = json.load(file)
-        json_df = data.get(name)
+        # with open(self.filename, 'r') as file:
+        #     data = json.load(file)
+        json_df = self.data.get(name)
         if json_df is None:
             raise IOError(f"'{name} is not in '{self.filename}..")
 
         # Convert the JSON object back to DataFrame
         return pd.read_json(json_df)
+
+    @staticmethod
+    def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
+        """Get simple df label from filepath."""
+        if filepath is None:
+            assert all([x is not None for x in [t0, t1, ifo]])
+            return f"{prefix}_{t0}_{t1}_{ifo}"
+        else:
+            main, _ = os.path.splitext(os.path.split(filepath)[-1])
+            body = "_".join(main.split("_")[-3:])
+            return f"{prefix}_{body}"
 
 
 class LPSDDataGroup:
@@ -100,6 +98,9 @@ class LPSDDataGroup:
             raise IOError("Invalid path: '{_data_path}'.")
 
         self.freq, self.logPSD, self.metadata = self.read_all_data(files)
+
+    def __len__(self):
+        return len(self.freq)
 
     def create_buffer_path(self, data_path, suffix=".h5"):
         """Create path based on data_path to store interim HDF data for fast retrieval."""
@@ -188,29 +189,34 @@ class LPSDData:
                            int(self.kwargs["Jdes"])
                            )
 
+    def save_to_hdf5(self, filename, dset="logPSD", dset_freq="frequency"):
+        """Save (log)PSD data to HDF5."""
+        tqdm.write(f"Writing data to: '{filename}'..")
+        with h5py.File(filename, "w") as _file:
+            _file.create_dataset(dset_freq, data=self.freq)
+            _file.create_dataset(dset, data=self.logPSD)
+            _file[dset].attrs.update(self.kwargs)
+
 
 class LPSDOutput(LPSDData):
     """Extend LPSDData with functionality to read from an output file."""
 
-    def __init__(self, filename):
+    def __init__(self, filename, delimiter="\t"):
         self.filename = filename
         is_hdf5 = filename.endswith(".h5") or filename.endswith(".hdf5")
         self.kwargs = self.get_lpsd_kwargs_hdf5() if is_hdf5 else self.get_lpsd_kwargs()
         # Check that file is valid
         assert self.kwargs
-        # This function is only meant to process complete files
-        if "batch" in self.kwargs:
-            assert self.kwargs["Jdes"] == self.kwargs["batch"]
 
         # Get logPSD data from file
         if is_hdf5:
             self.freq, self.logPSD = self.read_hdf5()
         else:
-            raw_freq, psd = self.read(raw_freq=True)
+            raw_freq, psd = self.read(raw_freq=True, delimiter=delimiter)
             # Protection against (old) LPSD bug
             self.logPSD = np.log(psd[:-1]) if psd[-1] == 0 else np.log(psd)
             self.freq = self.freq_from_kwargs() if len(self.logPSD) == int(self.kwargs["Jdes"])\
-                else raw_freq
+                else raw_freq[:len(self.logPSD)]
 
         super().__init__(self.logPSD, freq=self.freq, **self.kwargs)
 
@@ -246,7 +252,7 @@ class LPSDOutput(LPSDData):
             x, y = _f[freq_dset][()], _f[psd_dset][()]
         return np.array(x), np.array(y)
 
-    def read(self, dtype=np.float64, delimiter="\t", raw_freq=False):
+    def read(self, dtype=np.float64, delimiter="\t", raw_freq=False, idx=1):
         """
         Read an output file from LPSD.
 
@@ -259,7 +265,7 @@ class LPSDOutput(LPSDData):
                 try:
                     if raw_freq:
                         x += [float(row[0])]
-                    y += [float(row[1])]
+                    y += [float(row[idx])]
                 except (ValueError, IndexError):
                     continue
         return np.array(x, dtype=dtype), np.array(y, dtype=dtype)

@@ -158,7 +158,7 @@ def calc_max_lkl(Y, bkg, model_args, peak_norm, peak_shape,
                                      initial_dx=min(max_dist/2., abs(mu)),
                                      tolerance=1e-4)
         assert not np.isnan(sigma)
-    except (ValueError, AssertionError) as err:
+    except (ValueError, AssertionError):
         return np.nan, np.nan, np.nan, np.nan
     # TODO: Could also calculate zero-side of two-sided exact logL sigma
     return zero_lkl, max_lkl, mu, sigma
