@@ -347,6 +347,7 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
         df = pd.concat([df, pd.DataFrame(
             {"fmin": data.freq[start],
              "fmax": data.freq[end],
+             "x_knots": [list(f_popt[:n_knots])],
              "y_knots": [list(f_popt[n_knots:])],
              "alpha_skew": distr_popt[2],
              "loc_skew": distr_popt[0],
@@ -354,7 +355,6 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
              "chi_sqr": chi
              })])
 
-    mngr = LPSDJSONIO(output_path)
     mngr.update_file(data_path, df)
 
 
