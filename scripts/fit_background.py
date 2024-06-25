@@ -300,6 +300,14 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
     if not os.path.exists(data_path):
         print(f"[ERROR] The file '{data_path}' does not exist, aborting..")
         raise ValueError
+    mngr = LPSDJSONIO(output_path)
+    try:
+        mngr.get_df(mngr.get_label(data_path))
+    except IOError:
+        pass
+    else:
+        print(f"Skipping '{data_path}'")
+        return
     data = LPSDOutput(data_path)
     kwargs["plot_prefix"] = os.path.splitext(os.path.split(data_path)[-1])[0]
 
@@ -339,7 +347,6 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
         df = pd.concat([df, pd.DataFrame(
             {"fmin": data.freq[start],
              "fmax": data.freq[end],
-             "x_knots": [list(f_popt[:n_knots])],
              "y_knots": [list(f_popt[n_knots:])],
              "alpha_skew": distr_popt[2],
              "loc_skew": distr_popt[0],
