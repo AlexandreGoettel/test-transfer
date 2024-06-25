@@ -26,17 +26,6 @@ def get_A_star(tf_path):
     return f_A_star
 
 
-def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
-    """Get simple df label from filepath."""
-    if filepath is None:
-        assert all([x is not None for x in [t0, t1, ifo]])
-        return f"{prefix}_{t0}_{t1}_{ifo}"
-    else:
-        main, _ = os.path.splitext(os.path.split(filepath)[-1])
-        body = "_".join(main.split("_")[-3:])
-        return f"{prefix}_{body}"
-
-
 def sep_label(filepath):
     """Extract timestamp and ifo from LPSD output filepath."""
     t0, t1, ifo = os.path.splitext(os.path.split(filepath)[-1])[0].split("_")[-3:]
@@ -52,20 +41,18 @@ class LPSDJSONIO:
         self.update_data()
 
     def update_data(self):
-        with open(self.filename, "r") as _file:
-            self.data = json.load(_file)
+        """Read data contents from JSON file."""
+        if os.path.exists(self.filename):
+            with open(self.filename, "r") as _file:
+                self.data = json.load(_file)
+        else:
+            self.data = {}
 
     def update_file(self, name, df, orient="records"):
         """Write data to the JSON file, give it reference "name"."""
-        data = {}
-        if os.path.exists(self.filename):
-            with open(self.filename, "r") as _file:
-                data = json.load(_file)
-
-        # Update data with dataframe contents & save
-        data[get_label(name)] = df.to_json(orient=orient)
+        self.data[self.get_label(name)] = df.to_json(orient=orient)
         with open(self.filename, "w") as _file:
-            json.dump(data, _file)
+            json.dump(self.data, _file)
         self.update_data()
 
     def get_df(self, name):
@@ -73,14 +60,25 @@ class LPSDJSONIO:
         if not os.path.exists(self.filename):
             raise IOError(f"File '{self.filename}' does not exist..")
 
-        with open(self.filename, 'r') as file:
-            data = json.load(file)
-        json_df = data.get(name)
+        # with open(self.filename, 'r') as file:
+        #     data = json.load(file)
+        json_df = self.data.get(name)
         if json_df is None:
             raise IOError(f"'{name} is not in '{self.filename}..")
 
         # Convert the JSON object back to DataFrame
         return pd.read_json(json_df)
+
+    @staticmethod
+    def get_label(filepath=None, t0=None, t1=None, ifo=None, prefix="bkginfo"):
+        """Get simple df label from filepath."""
+        if filepath is None:
+            assert all([x is not None for x in [t0, t1, ifo]])
+            return f"{prefix}_{t0}_{t1}_{ifo}"
+        else:
+            main, _ = os.path.splitext(os.path.split(filepath)[-1])
+            body = "_".join(main.split("_")[-3:])
+            return f"{prefix}_{body}"
 
 
 class LPSDDataGroup:
@@ -251,7 +249,7 @@ class LPSDOutput(LPSDData):
             x, y = _f[freq_dset][()], _f[psd_dset][()]
         return np.array(x), np.array(y)
 
-    def read(self, dtype=np.float64, delimiter="\t", raw_freq=False):
+    def read(self, dtype=np.float64, delimiter="\t", raw_freq=False, idx=1):
         """
         Read an output file from LPSD.
 
@@ -264,7 +262,7 @@ class LPSDOutput(LPSDData):
                 try:
                     if raw_freq:
                         x += [float(row[0])]
-                    y += [float(row[1])]
+                    y += [float(row[idx])]
                 except (ValueError, IndexError):
                     continue
         return np.array(x, dtype=dtype), np.array(y, dtype=dtype)
