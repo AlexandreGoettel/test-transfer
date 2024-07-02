@@ -181,7 +181,6 @@ def bayesian_regularized_linreg(
     # Loop until bic stops improving
     i, no_improvement_count = 0, 0
     order = k_min
-    pbar = tqdm(disable=disable_tqdm, desc="BIC..", position=1, leave=False)
     while True:
         # Perform the fit
         bic, f_popt, distr_popt = get_bic(x, y, order, **bic_kwargs)
@@ -200,10 +199,8 @@ def bayesian_regularized_linreg(
             break
 
         # Loop conditions
-        pbar.update(1)
         i += 1
         order += k_pruning
-    pbar.close()
 
     if best_f_popt is None:
         return None, None, None
@@ -342,7 +339,10 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
         i, f_popt, distr_popt, chi = result
         start, end = zipped_positions[i]
 
-        assert not len(f_popt) % 2
+        if f_popt is None or distr_popt is None or len(f_popt) % 2:
+            print(f"[WARNING] invalid f_popt at {data.freq[start]}")
+            continue
+
         n_knots = len(f_popt) // 2
         df = pd.concat([df, pd.DataFrame(
             {"fmin": data.freq[start],
@@ -352,9 +352,8 @@ def fit_background_in_file(data_path, output_path, n_processes=1, buffer=50,
              "alpha_skew": distr_popt[2],
              "loc_skew": distr_popt[0],
              "sigma_skew": distr_popt[1],
-             "chi_sqr": chi
-             })])
-
+             "chi_sqr": chi}
+        )])
     mngr.update_file(data_path, df)
 
 
