@@ -6,7 +6,8 @@
 
 void askd (char *text, double *data);
 void asks (char *text, char *data);
-void aski (char *text, int *data); 
+void aski (char *text, int *data);
+void askil(char *text, long int *data);
 void gerror (const char *err);
 void gerror1 (const char *err, const char *s); 
 

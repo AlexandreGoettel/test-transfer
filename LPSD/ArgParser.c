@@ -50,6 +50,11 @@ static struct argp_option options[] = {
 	{"scale",   'x', "factor", 0,"scaling factor",						0},
 	{"iter",    'N', "iteration number", 0, "The current iteration of the run",             0}, 
 	{"Jdes",    'J', "Total frequencies", 0, "The total number of calculated freqs",        0},
+	{"fmin_fft",'F', "FFT fmin", 0, "Minimum frequency to calculate approx at", 	0},
+	{"fmax_fft",'X', "FFT fmax", 0, "Maximum frequency to calculate approx at",	0},
+	{"epsilon", 'E', "epsilon", 0, "Epsilon precision factor for FFT approx in percent.",	0},
+	{"max_mem", 'M', "2^max samples in memory", 0, "n for 2^n maximum samples in memory.",	0},
+	{"constQ_threshold", 'R', "rel. thresh.", 0, "relative constant Q threshold", 0},
 	{0,0,0,0,0,0}
 };
 
@@ -171,9 +176,23 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		break;
 	case 'N':
 		arguments->iter=atof(arg);
-		break;	
+		break;
+	case 'F':
+		arguments->fmin_fft=atof(arg);
+		break;
+	case 'X':
+		arguments->fmax_fft=atof(arg);
+		break;
+	case 'E':
+		arguments->epsilon=atof(arg);
+		break;
+	case 'M':
+		arguments->n_max_mem=atoi(arg);
+		break;
 	case 'J':
-		arguments->Jdes=atof(arg);	
+		arguments->Jdes=atof(arg);
+	case 'R':
+		arguments->constQ_rel_threshold=atof(arg);
 		
     	case ARGP_KEY_END:
       		break;

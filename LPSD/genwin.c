@@ -34,47 +34,47 @@ and some new flat-top windows." by G.Heinzel et al, available from:
 The two externally visible functions are:
 
 void set_window (int type, double req_psll, char *name, double *psll, 
-    double *rov, double *nenbw, double *w3db, double *flatness);
+	double *rov, double *nenbw, double *w3db, double *flatness);
 
 set_window must be called at least once initially, and every time
 a new type of window is requested (but not if only NFFT changes)
 
 input:  type   0...30 = window by number (see list below)
-	           -1 = flat-top by PSL
+			   -1 = flat-top by PSL
 		   -2 = Kaiser by PSLL
-    		  
-        req_psll: requested PSLL for types -1 and -2, ignored
-    			otherwise
+
+		req_psll: requested PSLL for types -1 and -2, ignored
+				otherwise
 output: char *name : Name of window function. space must be reserved
-		     by the caller (>= 20 bytes), e.g. by declaring
-    		     char name[20];		_NOT_ char *name;
-		     For Kaiser windows, the name contains the
-		       parameter alpha.
+			 by the caller (>= 20 bytes), e.g. by declaring
+				 char name[20];		_NOT_ char *name;
+			 For Kaiser windows, the name contains the
+			   parameter alpha.
 	psll: actual PSLL in dB (differs from requested PSLL for type=-1)
-    	rov: recommended overlap in %
-    	nenbw: preliminary estimate of NENBW in bins
-    	      (precise value will also be computed by makewin)
+		rov: recommended overlap in %
+		nenbw: preliminary estimate of NENBW in bins
+			  (precise value will also be computed by makewin)
 	w3dB: 3 dB bandwidth in bins
-    	flatness: flatness for -0.5 <= f <=0.5 in dB
-	    
-	    
+		flatness: flatness for -0.5 <= f <=0.5 in dB
+
+
 void makewinsincos (int nfft, double bin, double *win, double *winsum, 
-    double *winsum2, double *nenbw);
+	double *winsum2, double *nenbw);
 
 makewin computes the actual window values and must be called
 after set_window. It must be re-called if either a new type
 of window has been set with set_win or if NFFT has changed.
 
 input: nfft : length of FFT
-       bin : (possibly non-integer) number of bin.
+	   bin : (possibly non-integer) number of bin.
 output: win : the actual values of the window. Adequate space
-              must be reserved by the caller:
-	      size = 2*nfft 
-	      order: win[0]*cos, win[0]*sin, win[1]*cos, win[1]*sin, ...
+			  must be reserved by the caller:
+		  size = 2*nfft
+		  order: win[0]*cos, win[0]*sin, win[1]*cos, win[1]*sin, ...
 	winsum : sum of all window values. Even for half=1,
-	      the sum over all values 0...nfft-1 is returned
+		  the sum over all values 0...nfft-1 is returned
 	winsum2 : sum of all squared window values. Even for half=1,
-	      the sum over all values 0...nfft-1 is returned
+		  the sum over all values 0...nfft-1 is returned
 	nenbw : precise value of NENBW in bins	    
 
 */
@@ -289,9 +289,9 @@ win_Bartlett (double z)
 {
   z *= 2;
   if (z > 1)
-    return 2 - z;
+	return 2 - z;
   else
-    return z;
+	return z;
 }
 
 static double
@@ -318,7 +318,7 @@ win_Nuttall4 (double z)
 {
   z *= 2 * M_PI;
   return 0.3125 - 0.46875 * cos
-    (z) + 0.1875 * cos (2 * z) - 0.03125 * cos (3 * z);
+	(z) + 0.1875 * cos (2 * z) - 0.03125 * cos (3 * z);
 }
 
 static double
@@ -340,7 +340,7 @@ win_Nuttall4a (double z)
 {
   z *= 2 * M_PI;
   return 0.338946 - 0.481973 *
-    cos (z) + 0.161054 * cos (2 * z) - 0.018027 * cos (3 * z);
+	cos (z) + 0.161054 * cos (2 * z) - 0.018027 * cos (3 * z);
 }
 
 static double
@@ -349,7 +349,7 @@ win_BH92 (double z)
   z *= 2 * M_PI;
 
   return 0.35875 - 0.48829 * cos (z) + 0.14128 * cos (2 * z) -
-    0.01168 * cos (3 * z);
+	0.01168 * cos (3 * z);
 }
 
 static double
@@ -357,7 +357,7 @@ win_Nuttall4b (double z)
 {
   z *= 2 * M_PI;
   return 0.355768 - 0.487396 *
-    cos (z) + 0.144232 * cos (2 * z) - 0.012604 * cos (3 * z);
+	cos (z) + 0.144232 * cos (2 * z) - 0.012604 * cos (3 * z);
 }
 
 static double
@@ -365,7 +365,7 @@ win_Nuttall4c (double z)
 {
   z *= 2 * M_PI;
   return 0.3635819 - 0.4891775 *
-    cos (z) + 0.1365995 * cos (2 * z) - 0.0106411 * cos (3 * z);
+	cos (z) + 0.1365995 * cos (2 * z) - 0.0106411 * cos (3 * z);
 }
 
 static double
@@ -394,7 +394,7 @@ win_SFT4F (double z)
 {
   z *= 2 * M_PI;
   return 0.21706 - 0.42103 * cos (z)
-    + 0.28294 * cos (2 * z) - 0.07897 * cos (3 * z);
+	+ 0.28294 * cos (2 * z) - 0.07897 * cos (3 * z);
 }
 
 static double
@@ -402,7 +402,7 @@ win_SFT5F (double z)
 {
   z *= 2 * M_PI;
   return 0.1881 - 0.36923 * cos (z) +
-    0.28702 * cos (2 * z) - 0.13077 * cos (3 * z) + 0.02488 * cos (4 * z);
+	0.28702 * cos (2 * z) - 0.13077 * cos (3 * z) + 0.02488 * cos (4 * z);
 }
 
 static double
@@ -410,7 +410,7 @@ win_SFT4M (double z)
 {
   z *= 2 * M_PI;
   return 0.241906 - 0.460841 * cos
-    (z) + 0.255381 * cos (2 * z) - 0.041872 * cos (3 * z);
+	(z) + 0.255381 * cos (2 * z) - 0.041872 * cos (3 * z);
 }
 
 static double
@@ -443,8 +443,8 @@ win_SFT5M (double z)
 {
   z *= 2 * M_PI;
   return 0.209671 - 0.407331 * cos
-    (z) + 0.281225 * cos (2 * z) - 0.092669 * cos (3 * z) +
-    0.0091036 * cos (4 * z);
+	(z) + 0.281225 * cos (2 * z) - 0.092669 * cos (3 * z) +
+	0.0091036 * cos (4 * z);
 }
 
 static double
@@ -529,16 +529,16 @@ win_HFT248D (double z)
 }
 
 static int win_no = -2;
-static double win_alpha;
+static double win_alpha, win_alpha_sqr;
 
 void
 set_window (int type, double req_psll, char *name, double *psll, double *rov,
-	    double *nenbw, double *w3db, double *flatness, double *sbin)
+		double *nenbw, double *w3db, double *flatness, double *sbin)
 {
   int i;
   if (type >= 0)
-    {				/* window by number */
-      if (type < nwinlist)
+	{				/* window by number */
+	  if (type < nwinlist)
 	{
 	  strcpy (name, winlist[type].name);
 	  *psll = winlist[type].psll;
@@ -550,67 +550,85 @@ set_window (int type, double req_psll, char *name, double *psll, double *rov,
 	  win_no = type;
 	  return;
 	}
-      else
+	  else
 	gerror ("illegal window number requested.");
-    }
+	}
   else if (type == -1)
-    {				/* flat-top by PSLL */
-      win_no = -2;
-      for (i = 0; i < nwinlist; i++)
+	{				/* flat-top by PSLL */
+	  win_no = -2;
+	  for (i = 0; i < nwinlist; i++)
 	{
 	  if (!(winlist[i].isft))
-	    continue;
+		continue;
 	  if (winlist[i].psll > req_psll)
-	    {
-	      win_no = i;
-	      strcpy (name, winlist[i].name);
-	      *psll = winlist[i].psll;
-	      *rov = winlist[i].rov;
-	      *nenbw = winlist[i].nenbw;
-	      *w3db = winlist[i].w3db;
-	      *flatness = winlist[i].flatness;
-  	      *sbin = winlist[i].sbin;
-	      break;
-	    }
+		{
+		  win_no = i;
+		  strcpy (name, winlist[i].name);
+		  *psll = winlist[i].psll;
+		  *rov = winlist[i].rov;
+		  *nenbw = winlist[i].nenbw;
+		  *w3db = winlist[i].w3db;
+		  *flatness = winlist[i].flatness;
+		  *sbin = winlist[i].sbin;
+		  break;
+		}
 	}
-      if (win_no == -2)
+	  if (win_no == -2)
 	gerror ("no matching flat-top window found.");
-    }
+	}
   else if (type == -2)
-    {				/* Kaiser by PSLL */
-      if (req_psll < 25 || req_psll > 250)
+	{				/* Kaiser by PSLL */
+	  if (req_psll < 25 || req_psll > 250)
 	gerror ("Kaiser window requested PSLL outside range 25..250");
-      win_alpha = kaiser_alpha (req_psll);
-      sprintf (name, "Kaiser %.3f", win_alpha);
-      *psll = req_psll;
-      *rov = kaiser_rov (win_alpha);
-      *nenbw = kaiser_nenbw (win_alpha);
-      *w3db = kaiser_w3db (win_alpha);
-      *flatness = kaiser_flatness (win_alpha);
-      *sbin = kaiser_sbin(win_alpha);
-      win_no = -1;
-    }
+	  win_alpha = kaiser_alpha (req_psll);
+	  win_alpha_sqr = win_alpha * win_alpha;
+	  sprintf (name, "Kaiser %.3f", win_alpha);
+	  *psll = req_psll;
+	  *rov = kaiser_rov (win_alpha);
+	  *nenbw = kaiser_nenbw (win_alpha);
+	  *w3db = kaiser_w3db (win_alpha);
+	  *flatness = kaiser_flatness (win_alpha);
+	  *sbin = kaiser_sbin(win_alpha);
+	  win_no = -1;
+	}
   else
-    gerror ("illegal window type");
+	gerror ("illegal window type");
+}
+
+//@brief Analytical implementation of spectral Kernel with Kaiser window
+double
+get_kernel(double iFreq, double theta, double phi)
+{
+	double shifted_freq = iFreq*theta - phi;
+	double sqrt_term = shifted_freq*shifted_freq - win_alpha_sqr;
+
+	double output;
+	if (sqrt_term < 0) {
+		sqrt_term = M_PI * sqrt(-sqrt_term);
+		output = sinh(sqrt_term) / sqrt_term;
+	} else {
+		sqrt_term = M_PI * sqrt(sqrt_term);
+		output = sin(sqrt_term) / sqrt_term;
+	}
+	return output;
 }
 
 // @brief Wrapper for makewinsincos_indexed
 // @brief Calling this function will simply create the window for the entire segment
 void
 makewinsincos (long int nfft, double bin, double *win, double *winsum,
-               double *winsum2, double *nenbw)
+			   double *winsum2, double *nenbw)
 {
-    makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft, true);
+	makewinsincos_indexed(nfft, bin, win, winsum, winsum2, nenbw, 0, nfft, true);
 }
-
 
 // @brief Construct window from "start_index" on, for "count" bins
 // @brief Other parameters are from legacy code
 // @param reset_sums Set winsum,winsum2 back to zero before loop
 void
-makewinsincos_indexed (long int nfft, double bin, double *win, double *winsum,
-	       double *winsum2, double *nenbw, int start_index, int count,
-	       bool reset_sums)
+makewinsincos_indexed (unsigned long int nfft, double bin, double *win, double *winsum,
+		   double *winsum2, double *nenbw, unsigned long int start_index, unsigned int count,
+		   bool reset_sums)
 {
   // Make sure that the function was called correctly
   double z;
@@ -621,57 +639,59 @@ makewinsincos_indexed (long int nfft, double bin, double *win, double *winsum,
   if (reset_sums) *winsum = *winsum2 = 0;
 
   if (win_no == -2)
-    gerror ("set_window has not been called.");
+	gerror ("set_window has not been called.");
 
   fact = 2.0 * M_PI * bin / ((double) nfft);
   if (win_no == -1)  /* Kaiser */
   {
-    double kaiser_scal = netlibi0 (M_PI * win_alpha);
+	double kaiser_scal = netlibi0 (M_PI * win_alpha);
 
-    for (j = start_index; j < start_index + count; j++)
-    {
-      z = 2. * (double) j / (double) nfft - 1.;
-      winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
+	for (j = start_index; j < start_index + count; j++)
+	{
+	  z = 2. * (double) j / (double) nfft - 1.;
+	  winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
 
-      *winsum += winval;
-      *winsum2 += winval * winval;
-      arg = fact * (double) j;
+	  *winsum += winval;
+	  *winsum2 += winval * winval;
+	  arg = fact * (double) j;
 
-      *(win++) = cos(arg)*winval;
-      *(win++) = -sin(arg)*winval;
-    }
+	  *(win++) = cos(arg)*winval;
+	  *(win++) = -sin(arg)*winval;
+	}
   } else {
-    for (j = start_index; j < start_index + count; j++)
-    {
-      z = (double) j / (double) nfft;
-      winval = (*(winlist[win_no].winfun)) (z);
+	for (j = start_index; j < start_index + count; j++)
+	{
+	  z = (double) j / (double) nfft;
+	  winval = (*(winlist[win_no].winfun)) (z);
 
-      *winsum += winval;
-      *winsum2 += winval * winval;
-      arg = fact * (double) j;
+	  *winsum += winval;
+	  *winsum2 += winval * winval;
+	  arg = fact * (double) j;
 
-      *(win++) = cos(arg)*winval;
-      *(win++) = -sin(arg)*winval;
-    }
+	  *(win++) = cos(arg)*winval;
+	  *(win++) = -sin(arg)*winval;
+	}
   }
   *nenbw = nfft * *winsum2 / (*winsum * *winsum);
 }
 
 
 // @brief Wrapper for makewin_indexed for standard window creation
+// @brief Use iterations of makewin_indexed if nfft >= 2^31
 void
-makewin (long int nfft, double *win,
-         double *winsum, double *winsum2, double *nenbw)
+makewin (unsigned int nfft, double *win,
+		 double *winsum, double *winsum2, double *nenbw)
 {
-    makewin_indexed(nfft, 0, nfft, win, winsum, winsum2, nenbw, true);
+	makewin_indexed(nfft, 0, nfft, win, winsum, winsum2, nenbw, true);
 }
 
 // @brief Similar to makewinsincos, but leave the exponential term calculation out
 // @brief It is not the responsibility of this function to make sure that the length of win is correct!
+// @brief Careful: nfft and offset are long ints, but count is meant to be (just) int
 void
-makewin_indexed (long int nfft, int offset, int count, double *win,
-                 double *winsum, double *winsum2, double *nenbw,
-                 bool reset_sums)
+makewin_indexed (unsigned long int nfft, unsigned long int offset, unsigned int count,
+				 double *win, double *winsum, double *winsum2, double *nenbw,
+				 bool reset_sums)
 {
   register long int j;
   double z, winval;
@@ -679,29 +699,28 @@ makewin_indexed (long int nfft, int offset, int count, double *win,
   if (reset_sums) *winsum = *winsum2 = 0;
 
   if (win_no == -2)
-    gerror ("set_window has not been called.");
+	gerror ("set_window has not been called.");
   if (win_no == -1)  /* Kaiser */
   {
-    double kaiser_scal = netlibi0 (M_PI * win_alpha);
-    for (j = offset; j < offset + count; j++)
-    {
-      z = (double) j * factor - 1.;
-      winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z)) / kaiser_scal;
+	for (j = offset; j < offset + count; j++)
+	{
+	  z = (double) j * factor - 1.;
+	  winval = netlibi0 (M_PI * win_alpha * sqrt (1 - z * z));;
 
-      *winsum += winval;
-      *winsum2 += winval * winval;
-      *(win++) = winval;
-    }
+	  *winsum += winval;
+	  *winsum2 += winval * winval;
+	  *(win++) = winval;
+	}
   } else {
-    for (j = offset; j < offset + count; j++)
-    {
-      z = 0.5 * (double) j * factor;
+	for (j = offset; j < offset + count; j++)
+	{
+	  z = 0.5 * (double) j * factor;
 	  winval = (*(winlist[win_no].winfun)) (z);
 
 	  *winsum += winval;
-      *winsum2 += winval * winval;
-      *(win++) = winval;
-    }
+	  *winsum2 += winval * winval;
+	  *(win++) = winval;
+	}
   }
   *nenbw = nfft * *winsum2 / (*winsum * *winsum);
 }

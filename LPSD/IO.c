@@ -6,7 +6,6 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
-#include "config.h"
 #include "misc.h"
 #include "errors.h"
 #include "tics.h"
@@ -277,7 +276,16 @@ static void writeHeaderLine(FILE *ofp, tGNUTERM * gt) {
 			break;
 		case 'i':
 			fprintf(ofp, "Im(PSD)	");
-                        break;
+			break;
+		case 'w':
+			fprintf(ofp, "PSD_raw	");
+			break;
+		case 'I':
+			fprintf(ofp, "Im(PSD_raw)	");
+			break;
+		case 'l':
+			fprintf(ofp, "Re(PSD_raw)	");
+			break;
 		default:
 			strcpy(&tmp[0],&((*gt).fmt[0]));
 			(*gt).fmt[c+1]=0;
@@ -301,51 +309,60 @@ static void writeData(FILE *ofp, tCFG * cfg, tDATA * data, tGNUTERM * gt) {
 	int i;
 	unsigned int c;
 	
-	for (i = 0; i < (*cfg).nspec; i++) {
+	for (i = 0; i < (*cfg).nspec-1; i++) {
 		for (c = 0; c < strlen((*gt).fmt); c++) {
 			switch ((*gt).fmt[c]) {
 			case 'f':
-				fprintf(ofp, "%e	", (*data).fspec[i]);
+				fprintf(ofp, "%.10e\t", (*data).fspec[i]);
 				break;
 			case 'd':
-				fprintf(ofp, "%e	", sqrt((*data).psd[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).psd[i]));
 				break;
 			case 'D':
-				fprintf(ofp, "%e	", (*data).psd[i]);
+				fprintf(ofp, "%.10e\t", (*data).psd[i]);
 				break;
 			case 's':
-				fprintf(ofp, "%e	", sqrt((*data).ps[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).ps[i]));
 				break;
 			case 'S':
-				fprintf(ofp, "%e	", (*data).ps[i]);
+				fprintf(ofp, "%.10e\t", (*data).ps[i]);
 				break;
 			case 'N':
-				fprintf(ofp, "%d	", (*data).avg[i]);
+				fprintf(ofp, "%d\t", (*data).avg[i]);
 				break;
 			case 'u':
-				fprintf(ofp, "%e	", sqrt((*data).varpsd[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).varpsd[i]));
 				break;
 			case 'U':
-				fprintf(ofp, "%e	", (*data).varpsd[i]);
+				fprintf(ofp, "%.10e\t", (*data).varpsd[i]);
 				break;
 			case 'v':
-				fprintf(ofp, "%e	", sqrt((*data).varps[i]));
+				fprintf(ofp, "%.10e\t", sqrt((*data).varps[i]));
 				break;
 			case 'V':
-				fprintf(ofp, "%e	", (*data).varps[i]);
+				fprintf(ofp, "%.10e\t", (*data).varps[i]);
 				break;
 			case 'R':
-				fprintf(ofp, "%e	",
+				fprintf(ofp, "%.10e\t",
 					(*cfg).fsamp / (double) (*data).nffts[i]);
 				break;
 			case 'b':
-				fprintf(ofp, "%e	", (*data).bins[i]);
+				fprintf(ofp, "%.10e\t", (*data).bins[i]);
 				break;
 			case 'r':
-				fprintf(ofp, "%e        ", (*data).psd_real[i]);
+				fprintf(ofp, "%.10e\t", (*data).psd_real[i]);
 				break;
 			case 'i':
-				fprintf(ofp, "%e        ", (*data).psd_imag[i]);
+				fprintf(ofp, "%.10e\t", (*data).psd_imag[i]);
+				break;
+			case 'w':
+				fprintf(ofp, "%.10e\t", (*data).psd_raw[i]);
+				break;
+			case 'I':
+				fprintf(ofp, "%.10e\t", (*data).psd_raw_imag[i]);
+				break;
+			case 'l':
+				fprintf(ofp, "%.10e\t", (*data).psd_raw_real[i]);
 				break;
 			default:
 				break;
@@ -426,7 +443,7 @@ void writeOutputFile(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int 
 
 	ofp = fopen((*cfg).ofn, "w");
 	if (0 == ofp)
-		gerror1("Error opening", (*cfg).ofn);
+		gerror1("Error opening output file.. Aborting.", (*cfg).ofn);
 
 	writeComment(&cmt[0], cfg, wi, gt, data, argc, argv);
 	fprintf(ofp,"%s",cmt);
@@ -544,21 +561,6 @@ void saveResult(tCFG * cfg, tDATA * data, tGNUTERM * gt, tWinInfo *wi, int argc,
 {
 	double ymin, ymax;
 	int k;
-//	FILE * file1;
-
-	/* Load values from tempory backup into their respective columns */
-//	printf("mhhhhh\n");
-//	file1 = fopen(cfg->ofn, "r");
-//	printf("mh\n");
-//	for(k = 0; k < cfg->nspec; k++){
-////	    fscanf(file1, "%lf %lf %d", &(*data).psd[k], &(*data).ps[k], &(*data).avg[k]);
-////        printf("\t%e, %e, %d\n", data->psd[k], data->ps[k], data->avg[k]);
-//	    fscanf(file1, "%lf %lf %d", &(data->psd[k]), &(data->ps[k]), &(data->avg[k]));
-//	}
-//	printf("mh\n");
-//	fclose(file1);
-//	printf("mh\n");
-	
 	/* write output file with colums specified in gt */
 	writeOutputFile(cfg, data, gt, wi, argc, argv);
 
@@ -667,8 +669,8 @@ void read_from_dataset_stride(struct hdf5_contents *contents, hsize_t *offset,
                                         offset, stride, count, NULL);
     hid_t memspace = H5Screate_simple(data_rank, data_count, NULL);
 
-    status = H5Dread(contents->dataset, H5T_NATIVE_DOUBLE, memspace, contents->dataspace,
-		             H5P_DEFAULT, data_out);
+    status = H5Dread(contents->dataset, H5T_NATIVE_DOUBLE, memspace,
+                     contents->dataspace, H5P_DEFAULT, data_out);
     // Clean up
     H5Sclose(memspace);
     status = H5Sselect_none(contents->dataspace);

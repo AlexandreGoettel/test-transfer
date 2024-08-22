@@ -62,7 +62,9 @@ static void act_METHOD(char *s);
 static void act_tmin(char *s);
 static void act_tmax(char *s);
 static void act_fmin(char *s);
+static void act_fmin_fft(char *s);
 static void act_fmax(char *s);
+static void act_fmax_fft(char *s);
 static void act_sbin(char *s);
 static void act_time(char *s);
 static void act_colA(char *s);
@@ -90,6 +92,8 @@ static tPARSEPAIR pplist [] = {
 	{"TMAX",	act_tmax},
 	{"FMIN",	act_fmin},
 	{"FMAX",	act_fmax},
+	{"FMIN_FFT",act_fmin_fft},
+	{"FMAX_FFT",act_fmax_fft},
 	{"SBIN",	act_sbin},
 	{"TIME",	act_time},
 	{"COLA",	act_colA},
@@ -109,6 +113,9 @@ static const int ngtlist = sizeof (gtlist) / sizeof (tPARSEPAIR);
 static tCFG cfg={usedefs:0,
 		ifn:DEFIFN,
 		dataset_name:DEFDSET,
+		epsilon:DEFEPSILON,
+		constQ_rel_threshold:DEFCONSTQRELTHRESHOLD,
+		n_max_mem:DEFMAXMEM,
 		askifn:1,
 		ofn:DEFOFN,
 		askofn:1,
@@ -137,8 +144,10 @@ static tCFG cfg={usedefs:0,
 		asktmax:1,
 		fmin:DEFFMIN,
 		askfmin:1,
+		fmin_fft:DEFFMIN_FFT,
 		fmax:DEFFMAX,
 		askfmax:1,
+		fmax_fft:DEFFMAX_FFT,
 		fres:-1,
 		askfres:0,
 		cmdfres:0,
@@ -174,7 +183,7 @@ void getGNUTERM(int i, tGNUTERM *dest) {
 
 /* returns 0 if token is not contained at beginning of s, !0 otherwise */
 static int isToken(char *s, char *token) {
-	return (int)strstr(s,token);
+	return strstr(s, token) != NULL ? 1 : 0;
 }
 
 /* 
@@ -276,6 +285,14 @@ static void act_ulsb(char *s) {
 	cfg.ulsb=getDBLValue(s);
 	if (s[0]=='?') cfg.askulsb=1;
 	else cfg.askulsb=0;
+}
+
+static void act_fmin_fft(char *s) {
+	cfg.fmin_fft=getDBLValue(s);
+}
+
+static void act_fmax_fft(char *s) {
+	cfg.fmax_fft=getDBLValue(s);
 }
 
 static void act_desavg(char *s) {
@@ -419,7 +436,7 @@ int readConfigFile() {
 	if (gti==0) {				/* no gnuplot terminal has been defined at all */
 		gti=1;
 		strcpy(gt[0].identifier,"standard gnuplot terminal");
-		strcpy(gt[0].fmt,"fDSNri");
+		strcpy(gt[0].fmt,"fDSNriwIl");
 		strcpy(gt[0].cmds,"");
 	}
 	return(ok);
@@ -464,10 +481,8 @@ sprintf(&dest[strlen(dest)],"---Data--------------------------------------------
 
 static void printOutput(char *dest, tCFG cfg, tGNUTERM gt, tDATA data) {
 	char meth[2][SLEN]={"LPSD","FFTW"};
-	int avg;
 
-	avg=floor((data.nread-cfg.nfft)/(cfg.ovlp/100.)/cfg.nfft+1);
-sprintf(&dest[strlen(dest)],"---Output------------------------------------------------------------------\n");
+	sprintf(&dest[strlen(dest)],"---Output------------------------------------------------------------------\n");
 	sprintf(&dest[strlen(dest)],"Size: %ld\t\t",cfg.nspec);
 	sprintf(&dest[strlen(dest)],"Fmin (Hz): %.1e\t",cfg.fmin);
 	sprintf(&dest[strlen(dest)],"Fmax (Hz): %.1e\n",cfg.fmax);
@@ -492,14 +507,3 @@ void printConfig(char *dest, tCFG cfg, tWinInfo wi, tGNUTERM gt, tDATA data) {
 	printData(dest, cfg, data);
 	printOutput(dest, cfg, gt, data);
 }
-
-/*
-int main(int argc, char *argv[]) {
-	CFN=getenv(PSDCFN);
-	if (CFN==0) printf("%s not found\n",PSDCFN);
-	printf("Reading from config file %s.\n",CFN);
-	
-	
-	return(0);
-}
-*/

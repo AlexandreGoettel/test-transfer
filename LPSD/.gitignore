@@ -2,3 +2,6 @@ build/*
 *.o
 *.gnu
 .idea/*
+CMakeFiles/
+Makefile
+*.cmake
